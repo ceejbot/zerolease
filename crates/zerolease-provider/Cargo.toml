@@ -13,10 +13,10 @@ secrecy.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync", "rt"] }
 uuid.workspace = true
-zerolease = { workspace = true, default-features = false, optional = true }
+zerolease = { workspace = true, default-features = false }
 
 [features]
-vault = ["dep:zerolease"]
+vault = []
 
 [lints]
 workspace = true

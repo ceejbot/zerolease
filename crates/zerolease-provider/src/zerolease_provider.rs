@@ -53,13 +53,17 @@ impl CredentialProvider for ZeroleaseProvider {
 
         // Request a lease
         let grant = client
-            .request_lease(&request.agent_id, &request.secret_name, &request.target_domain)
+            .request_lease(
+                request.agent_id.as_str(),
+                request.secret_name.as_str(),
+                request.target_domain.as_str(),
+            )
             .await
             .map_err(|e| ProviderError::Unavailable(e.to_string()))?;
 
         // Access the secret through the lease
         let secret_bytes = client
-            .access_secret(*grant.lease_id.as_uuid(), &request.target_domain)
+            .access_secret(*grant.lease_id.as_uuid(), request.target_domain.as_str())
             .await
             .map_err(|e| ProviderError::Unavailable(e.to_string()))?;
 
