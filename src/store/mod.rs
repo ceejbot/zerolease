@@ -19,11 +19,9 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 use crate::types::{SecretId, SecretName};
 
-#[cfg(feature = "postgres")]
-pub mod postgres;
-
-#[cfg(feature = "sqlite")]
-pub mod sqlite;
+// Storage backend implementations live in separate crates:
+// - zerolease-store-rusqlite (for apps using rusqlite, e.g. zeroclaw)
+// - zerolease-store-sqlx (for standalone deployments) [planned]
 
 /// An encrypted secret as stored in the backend.
 ///
@@ -70,6 +68,18 @@ pub enum CipherAlgorithm {
     XChaCha20Poly1305,
 }
 
+impl CipherAlgorithm {
+    /// Serialize to a JSON string for database storage.
+    pub fn to_db_string(&self) -> String {
+        serde_json::to_string(self).expect("CipherAlgorithm serialization is infallible")
+    }
+
+    /// Deserialize from a JSON string read from the database.
+    pub fn from_db_string(s: &str) -> Result<Self> {
+        serde_json::from_str(s).map_err(|e| crate::error::Error::Storage(format!("invalid algorithm value: {e}")))
+    }
+}
+
 /// What kind of credential this is. Informs how it should be injected
 /// into requests (e.g., as a Bearer token header vs. basic auth).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,6 +103,18 @@ pub enum SecretKind {
     ClientCert,
     /// Arbitrary secret blob (escape hatch).
     Opaque,
+}
+
+impl SecretKind {
+    /// Serialize to a JSON string for database storage.
+    pub fn to_db_string(&self) -> String {
+        serde_json::to_string(self).expect("SecretKind serialization is infallible")
+    }
+
+    /// Deserialize from a JSON string read from the database.
+    pub fn from_db_string(s: &str) -> Result<Self> {
+        serde_json::from_str(s).map_err(|e| crate::error::Error::Storage(format!("invalid kind value: {e}")))
+    }
 }
 
 /// Parameters for storing a new secret. The vault encrypts the plaintext

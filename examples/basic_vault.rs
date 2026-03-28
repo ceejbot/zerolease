@@ -12,11 +12,11 @@ use zerolease::audit::AuditLog;
 use zerolease::keysource::env::EnvVarSource;
 use zerolease::lease::LeaseTerms;
 use zerolease::policy::{AgentPattern, PolicyConfig, PolicyEngine, PolicyGrant, SecretPattern};
-use zerolease::store::sqlite::SqliteStore;
 use zerolease::store::{CipherAlgorithm, SecretKind};
 use zerolease::transport::PeerIdentity;
 use zerolease::types::{AgentId, DomainScope, SecretName};
 use zerolease::vault::Vault;
+use zerolease_store_rusqlite::RusqliteStore;
 
 /// A no-op audit log for this example. In production, use SqliteAuditLog
 /// or configure a tracing subscriber to capture audit events.
@@ -58,7 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let key_source = EnvVarSource::new("ZEROLEASE_KEY");
 
     // SQLite for secret storage (single-file, zero-config).
-    let store = SqliteStore::new("example-secrets.db").await?;
+    let store = RusqliteStore::new("example-secrets.db").await?;
 
     // Policy: allow "my-agent" to access "github-pat" for github.com
     let policy = PolicyEngine::new(PolicyConfig {

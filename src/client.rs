@@ -252,7 +252,7 @@ mod tests {
     use crate::lease::LeaseTerms;
     use crate::policy::{AgentPattern, PolicyConfig, PolicyEngine, PolicyGrant, SecretPattern};
     use crate::server::VaultServer;
-    use crate::store::sqlite::SqliteStore;
+    use zerolease_store_rusqlite::RusqliteStore;
     use crate::store::{CipherAlgorithm, SecretKind};
     use crate::transport::uds::{UdsConnector, UdsListener};
     use crate::types::{AgentId, DomainScope, LeaseId, SecretName};
@@ -292,7 +292,7 @@ mod tests {
         let db_path = dir.path().join("secrets.db");
 
         let key_source = EnvVarSource::new(env_var);
-        let store = SqliteStore::new(&db_path)
+        let store = RusqliteStore::new(&db_path)
             .await
             .expect("failed to initialize SQLite store");
         let audit = NoopAuditLog;

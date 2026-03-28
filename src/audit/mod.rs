@@ -29,8 +29,8 @@ use crate::error::Result;
 use crate::transport::PeerIdentity;
 use crate::types::{AgentId, DomainScope, LeaseId, SecretName};
 
-#[cfg(feature = "sqlite")]
-pub mod sqlite;
+// Audit log implementations live in separate crates alongside their
+// corresponding store backends.
 
 /// A single audit log entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,6 +116,33 @@ pub enum AuditEvent {
 
     /// Policy was reloaded.
     PolicyReloaded { grant_count: usize },
+}
+
+impl AuditEvent {
+    /// Extract denormalized `secret_name` and `lease_id` for database indexing.
+    pub fn indexed_fields(&self) -> (Option<String>, Option<String>) {
+        match self {
+            Self::LeaseGranted {
+                secret_name, lease_id, ..
+            } => (
+                Some(secret_name.as_str().to_string()),
+                Some(lease_id.as_uuid().to_string()),
+            ),
+            Self::SecretAccessed {
+                secret_name, lease_id, ..
+            } => (
+                Some(secret_name.as_str().to_string()),
+                Some(lease_id.as_uuid().to_string()),
+            ),
+            Self::LeaseRevoked { lease_id, .. } => (None, Some(lease_id.as_uuid().to_string())),
+            Self::LeaseRenewed { lease_id, .. } => (None, Some(lease_id.as_uuid().to_string())),
+            Self::AccessDenied { secret_name, .. } => (Some(secret_name.as_str().to_string()), None),
+            Self::SecretStored { secret_name } => (Some(secret_name.as_str().to_string()), None),
+            Self::SecretRotated { secret_name, .. } => (Some(secret_name.as_str().to_string()), None),
+            Self::SecretDeleted { secret_name } => (Some(secret_name.as_str().to_string()), None),
+            Self::DekRotated | Self::PolicyReloaded { .. } => (None, None),
+        }
+    }
 }
 
 /// Why a lease was revoked.
