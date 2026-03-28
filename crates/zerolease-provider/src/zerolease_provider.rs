@@ -90,11 +90,11 @@ async fn revocation_worker(socket_path: PathBuf, mut rx: mpsc::Receiver<Uuid>) {
                 if let Err(e) = client.revoke_lease(lease_id, RevocationReason::AdminRevoked).await {
                     // Best-effort: log and continue. The lease has a TTL
                     // and will expire on its own.
-                    eprintln!("warning: failed to revoke lease {lease_id}: {e}");
+                    tracing::warn!(%lease_id, error = %e, "failed to revoke lease");
                 }
             }
             Err(e) => {
-                eprintln!("warning: could not connect for lease revocation: {e}");
+                tracing::warn!(error = %e, "could not connect for lease revocation");
             }
         }
     }
