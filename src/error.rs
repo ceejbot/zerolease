@@ -58,6 +58,10 @@ pub enum Error {
     #[error("invalid configuration: {0}")]
     InvalidConfig(String),
 
+    // -- Capability errors --
+    #[error("operation not supported: {0}")]
+    NotSupported(String),
+
     // -- Remote errors (client-side) --
     #[error("remote error ({code}): {message}")]
     Remote { code: String, message: String },
