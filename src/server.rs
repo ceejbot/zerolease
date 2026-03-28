@@ -202,17 +202,14 @@ where
     }
 }
 
-/// Parse request params into a typed struct, returning a protocol error on failure.
+/// Parse request params into a typed struct, returning a protocol error on
+/// failure.
 macro_rules! parse_params {
     ($request:expr, $type:ty) => {
         match serde_json::from_value::<$type>($request.params) {
             Ok(r) => r,
             Err(e) => {
-                return Response::protocol_error(
-                    $request.id,
-                    CODE_INVALID_REQUEST,
-                    format!("invalid params: {e}"),
-                );
+                return Response::protocol_error($request.id, CODE_INVALID_REQUEST, format!("invalid params: {e}"));
             }
         }
     };
@@ -295,7 +292,9 @@ where
 
             json_response!(
                 id,
-                vault.store_secret(&SecretName::new(&req.name), &plaintext, kind, req.description, peer).await
+                vault
+                    .store_secret(&SecretName::new(&req.name), &plaintext, kind, req.description, peer)
+                    .await
             )
         }
 
@@ -305,7 +304,12 @@ where
             json_response!(
                 id,
                 vault
-                    .request_lease(&agent, &SecretName::new(&req.secret_name), &DomainScope::new(&req.domain), peer)
+                    .request_lease(
+                        &agent,
+                        &SecretName::new(&req.secret_name),
+                        &DomainScope::new(&req.domain),
+                        peer
+                    )
                     .await
             )
         }
@@ -333,7 +337,10 @@ where
                 }
             };
 
-            match vault.revoke_lease(&LeaseId::from_uuid(req.lease_id), reason, peer).await {
+            match vault
+                .revoke_lease(&LeaseId::from_uuid(req.lease_id), reason, peer)
+                .await
+            {
                 Ok(()) => Response::success(id, serde_json::json!({})),
                 Err(e) => Response::from_error(id, &e),
             }
@@ -342,24 +349,35 @@ where
         methods::REVOKE_ALL_FOR_AGENT => {
             let req = parse_params!(request, RevokeAllForAgentRequest);
             let agent = resolve_agent(&req.agent);
-            json_response!(id, vault.revoke_all_for_agent(&agent, peer).await.map(|count| {
-                RevokeAllForAgentResponse { revoked_count: count }
-            }))
+            json_response!(
+                id,
+                vault
+                    .revoke_all_for_agent(&agent, peer)
+                    .await
+                    .map(|count| { RevokeAllForAgentResponse { revoked_count: count } })
+            )
         }
 
         methods::LIST_SECRETS => {
-            json_response!(id, vault.list_secrets().await.map(|secrets| {
-                let values: Vec<serde_json::Value> =
-                    secrets.into_iter().filter_map(|s| serde_json::to_value(s).ok()).collect();
-                ListSecretsResponse { secrets: values }
-            }))
+            json_response!(
+                id,
+                vault.list_secrets().await.map(|secrets| {
+                    let values: Vec<serde_json::Value> = secrets
+                        .into_iter()
+                        .filter_map(|s| serde_json::to_value(s).ok())
+                        .collect();
+                    ListSecretsResponse { secrets: values }
+                })
+            )
         }
 
         methods::RENEW_LEASE => {
             let req = parse_params!(request, RenewLeaseRequest);
             json_response!(
                 id,
-                vault.renew_lease(&LeaseId::from_uuid(req.lease_id), req.extension_secs, peer).await
+                vault
+                    .renew_lease(&LeaseId::from_uuid(req.lease_id), req.extension_secs, peer)
+                    .await
             )
         }
 
@@ -383,6 +401,7 @@ mod tests {
     use base64::Engine;
     use tempfile::NamedTempFile;
     use uuid::Uuid;
+    use zerolease_store_rusqlite::RusqliteStore;
 
     use super::*;
     use crate::audit::*;
@@ -393,7 +412,6 @@ mod tests {
     use crate::policy::{AgentPattern, PolicyConfig, PolicyEngine, PolicyGrant, SecretPattern};
     use crate::protocol::{Request, methods};
     use crate::store::CipherAlgorithm;
-    use zerolease_store_rusqlite::RusqliteStore;
     use crate::transport::PeerIdentity;
     use crate::types::{AgentId, DomainScope, LeaseId, SecretName};
     use crate::vault::Vault;

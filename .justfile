@@ -3,7 +3,7 @@ _help:
 
 # Run all unit tests using nextest.
 test:
-    cargo nextest run --future-incompat-report
+    cargo nextest run --workspace --all-targets --future-incompat-report
 
 # Run the fuzz tests against the wireline protocol.
 fuzz:
@@ -24,7 +24,7 @@ fmt:
 
 # Run the same checks we run in CI. Requires nightly.
 ci: test fmt
-    cargo clippy --all-targets
+    cargo clippy --workspace --all-targets
     cargo test --doc
 
 # Install required tools

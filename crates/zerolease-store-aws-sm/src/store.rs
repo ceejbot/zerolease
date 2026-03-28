@@ -29,13 +29,10 @@
 
 use aws_sdk_secretsmanager::Client;
 use aws_sdk_secretsmanager::error::SdkError;
-use aws_sdk_secretsmanager::types::Filter;
-use aws_sdk_secretsmanager::types::FilterNameStringType;
-use aws_sdk_secretsmanager::types::Tag;
+use aws_sdk_secretsmanager::types::{Filter, FilterNameStringType, Tag};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
 use zerolease::error::{Error, Result};
 use zerolease::store::{
     BatchUpdateItem, CipherAlgorithm, SecretKind, SecretMetadata, SecretStore, StoreSecretParams, StoredSecret,
@@ -303,7 +300,14 @@ impl SecretStore for AwsSecretsManagerStore {
         let payload_str = Self::serialize_payload(&payload)?;
         let sm_name = self.sm_name(name);
 
-        match self.client.put_secret_value().secret_id(&sm_name).secret_string(&payload_str).send().await {
+        match self
+            .client
+            .put_secret_value()
+            .secret_id(&sm_name)
+            .secret_string(&payload_str)
+            .send()
+            .await
+        {
             Ok(_) => {}
             Err(SdkError::ServiceError(e)) if e.err().is_resource_not_found_exception() => {
                 return Err(Error::SecretNotFound(name.clone()));
@@ -479,8 +483,9 @@ impl SecretStore for AwsSecretsManagerStore {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use zerolease::store::CipherAlgorithm;
+
+    use super::*;
 
     fn test_params(name: &str) -> StoreSecretParams {
         StoreSecretParams {

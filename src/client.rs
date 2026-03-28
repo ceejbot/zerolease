@@ -244,6 +244,7 @@ mod tests {
 
     use tempfile::TempDir;
     use tokio::task::JoinHandle;
+    use zerolease_store_rusqlite::RusqliteStore;
 
     use super::*;
     use crate::audit::*;
@@ -252,7 +253,6 @@ mod tests {
     use crate::lease::LeaseTerms;
     use crate::policy::{AgentPattern, PolicyConfig, PolicyEngine, PolicyGrant, SecretPattern};
     use crate::server::VaultServer;
-    use zerolease_store_rusqlite::RusqliteStore;
     use crate::store::{CipherAlgorithm, SecretKind};
     use crate::transport::uds::{UdsConnector, UdsListener};
     use crate::types::{AgentId, DomainScope, LeaseId, SecretName};

@@ -36,8 +36,7 @@ impl StaticProvider {
 
     /// Insert a credential. Overwrites any existing value for the key.
     pub fn insert(&mut self, secret_name: SecretName, value: impl Into<String>) {
-        self.credentials
-            .insert(secret_name, SecretString::from(value.into()));
+        self.credentials.insert(secret_name, SecretString::from(value.into()));
     }
 }
 
