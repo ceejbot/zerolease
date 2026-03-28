@@ -249,59 +249,52 @@ impl SecretStore for RusqliteStore {
     }
 }
 
-fn row_to_stored_secret(row: &rusqlite::Row<'_>) -> Result<StoredSecret> {
-    let id_str: String = row.get("id").map_err(|e| Error::Storage(e.to_string()))?;
-    let id_uuid = Uuid::parse_str(&id_str).map_err(|e| Error::Storage(e.to_string()))?;
-    let name_str: String = row.get("name").map_err(|e| Error::Storage(e.to_string()))?;
-    let algorithm_str: String = row.get("algorithm").map_err(|e| Error::Storage(e.to_string()))?;
-    let kind_str: String = row.get("kind").map_err(|e| Error::Storage(e.to_string()))?;
-    let description: Option<String> = row.get("description").map_err(|e| Error::Storage(e.to_string()))?;
-    let created_at_str: String = row.get("created_at").map_err(|e| Error::Storage(e.to_string()))?;
-    let updated_at_str: String = row.get("updated_at").map_err(|e| Error::Storage(e.to_string()))?;
-    let version: i32 = row.get("version").map_err(|e| Error::Storage(e.to_string()))?;
-    let ciphertext: Vec<u8> = row.get("ciphertext").map_err(|e| Error::Storage(e.to_string()))?;
-    let nonce: Vec<u8> = row.get("nonce").map_err(|e| Error::Storage(e.to_string()))?;
+/// Extract a column value from a rusqlite row, mapping errors to `Error::Storage`.
+macro_rules! col {
+    ($row:expr, $name:expr, $type:ty) => {
+        $row.get::<_, $type>($name).map_err(|e| Error::Storage(e.to_string()))?
+    };
+}
 
+/// Parse a UUID string column into a `SecretId`.
+fn parse_id(row: &rusqlite::Row<'_>) -> Result<SecretId> {
+    let id_str: String = col!(row, "id", String);
+    let uuid = Uuid::parse_str(&id_str).map_err(|e| Error::Storage(e.to_string()))?;
+    Ok(SecretId::from_uuid(uuid))
+}
+
+/// Parse an RFC 3339 timestamp column into `DateTime<Utc>`.
+fn parse_timestamp(row: &rusqlite::Row<'_>, column: &str) -> Result<chrono::DateTime<Utc>> {
+    let s: String = col!(row, column, String);
+    chrono::DateTime::parse_from_rfc3339(&s)
+        .map(|dt| dt.with_timezone(&Utc))
+        .map_err(|e| Error::Storage(format!("invalid {column}: {e}")))
+}
+
+fn row_to_stored_secret(row: &rusqlite::Row<'_>) -> Result<StoredSecret> {
     Ok(StoredSecret {
-        id: SecretId::from_uuid(id_uuid),
-        name: SecretName::new(name_str),
-        ciphertext,
-        nonce,
-        algorithm: CipherAlgorithm::parse_db(&algorithm_str)?,
-        kind: SecretKind::parse_db(&kind_str)?,
-        description,
-        created_at: chrono::DateTime::parse_from_rfc3339(&created_at_str)
-            .map_err(|e| Error::Storage(format!("invalid created_at: {e}")))?
-            .with_timezone(&Utc),
-        updated_at: chrono::DateTime::parse_from_rfc3339(&updated_at_str)
-            .map_err(|e| Error::Storage(format!("invalid updated_at: {e}")))?
-            .with_timezone(&Utc),
-        version: version as u32,
+        id: parse_id(row)?,
+        name: SecretName::new(col!(row, "name", String)),
+        ciphertext: col!(row, "ciphertext", Vec<u8>),
+        nonce: col!(row, "nonce", Vec<u8>),
+        algorithm: CipherAlgorithm::parse_db(&col!(row, "algorithm", String))?,
+        kind: SecretKind::parse_db(&col!(row, "kind", String))?,
+        description: col!(row, "description", Option<String>),
+        created_at: parse_timestamp(row, "created_at")?,
+        updated_at: parse_timestamp(row, "updated_at")?,
+        version: col!(row, "version", i32) as u32,
     })
 }
 
 fn row_to_metadata(row: &rusqlite::Row<'_>) -> Result<SecretMetadata> {
-    let id_str: String = row.get("id").map_err(|e| Error::Storage(e.to_string()))?;
-    let id_uuid = Uuid::parse_str(&id_str).map_err(|e| Error::Storage(e.to_string()))?;
-    let name_str: String = row.get("name").map_err(|e| Error::Storage(e.to_string()))?;
-    let kind_str: String = row.get("kind").map_err(|e| Error::Storage(e.to_string()))?;
-    let description: Option<String> = row.get("description").map_err(|e| Error::Storage(e.to_string()))?;
-    let created_at_str: String = row.get("created_at").map_err(|e| Error::Storage(e.to_string()))?;
-    let updated_at_str: String = row.get("updated_at").map_err(|e| Error::Storage(e.to_string()))?;
-    let version: i32 = row.get("version").map_err(|e| Error::Storage(e.to_string()))?;
-
     Ok(SecretMetadata {
-        id: SecretId::from_uuid(id_uuid),
-        name: SecretName::new(name_str),
-        kind: SecretKind::parse_db(&kind_str)?,
-        description,
-        created_at: chrono::DateTime::parse_from_rfc3339(&created_at_str)
-            .map_err(|e| Error::Storage(format!("invalid created_at: {e}")))?
-            .with_timezone(&Utc),
-        updated_at: chrono::DateTime::parse_from_rfc3339(&updated_at_str)
-            .map_err(|e| Error::Storage(format!("invalid updated_at: {e}")))?
-            .with_timezone(&Utc),
-        version: version as u32,
+        id: parse_id(row)?,
+        name: SecretName::new(col!(row, "name", String)),
+        kind: SecretKind::parse_db(&col!(row, "kind", String))?,
+        description: col!(row, "description", Option<String>),
+        created_at: parse_timestamp(row, "created_at")?,
+        updated_at: parse_timestamp(row, "updated_at")?,
+        version: col!(row, "version", i32) as u32,
     })
 }
 
