@@ -4,6 +4,7 @@ on:
         branches: ["latest"]
         paths:
             - src/**
+            - crates/**
             - Cargo.toml
             - Cargo.lock
             - .github/workflows/test.yaml
@@ -46,8 +47,12 @@ jobs:
                       ~/.cargo/bin
                       target
 
-            - name: consult Clippy
-              run: cargo clippy --all-targets --features postgres,vsock
+            - name: Lint workspace (clippy)
+              run: |
+                  cargo clippy --workspace --all-targets
+                  cargo clippy -p zerolease --all-targets --features vsock,kms
+                  cargo clippy -p zerolease-provider --all-targets --features vault
+                  cargo clippy --manifest-path crates/zerolease-store-postgres/Cargo.toml --all-targets
 
             - name: Install cargo-nextest
               shell: bash
@@ -58,13 +63,16 @@ jobs:
                     mv cargo-nextest /home/runner/.cargo/bin
                   fi
 
-            - name: Run tests (including vsock)
-              run: cargo nextest run --features vsock
+            - name: Run workspace tests
+              run: cargo nextest run --workspace
+
+            - name: Run vsock tests
+              run: cargo nextest run -p zerolease --features vsock
 
             - name: Run PostgreSQL integration tests
               env:
                   DATABASE_URL: postgres://zerolease:zerolease@localhost/zerolease_test
-              run: cargo nextest run --features postgres store::postgres::tests -E 'test(store::postgres)' --run-ignored ignored-only --test-threads=1
+              run: cargo nextest run --manifest-path crates/zerolease-store-postgres/Cargo.toml --run-ignored ignored-only --test-threads=1
 
             - name: Run KMS integration tests
               env:
@@ -73,10 +81,12 @@ jobs:
                   AWS_REGION: ${{ secrets.AWS_REGION }}
                   ZEROLEASE_KMS_TEST_KEY_ID: alias/zerolease-test
                   ZEROLEASE_KMS_TEST_REGION: us-west-2
-              run: cargo nextest run --features kms keysource::kms -E 'test(keysource::kms)' --run-ignored ignored-only --test-threads=1
+              run: cargo nextest run -p zerolease --features kms -E 'test(keysource::kms)' --run-ignored ignored-only --test-threads=1
 
             - name: Run doctests
-              run: cargo test --doc
+              run: |
+                  cargo test --workspace --doc
+                  cargo test --manifest-path crates/zerolease-store-postgres/Cargo.toml --doc
 
     coverage:
         name: coverage
@@ -108,17 +118,20 @@ jobs:
             - name: Install cargo-llvm-cov
               uses: taiki-e/install-action@cargo-llvm-cov
 
-            - name: Generate coverage (default + vsock tests)
-              run: cargo llvm-cov --features vsock,postgres --lcov --output-path lcov-default.info
+            - name: Generate coverage (workspace tests)
+              run: cargo llvm-cov --workspace --lcov --output-path lcov-workspace.info
+
+            - name: Generate coverage (vsock tests)
+              run: cargo llvm-cov -p zerolease --features vsock --lcov --output-path lcov-vsock.info --no-clean
 
             - name: Generate coverage (PostgreSQL tests)
               env:
                   DATABASE_URL: postgres://zerolease:zerolease@localhost/zerolease_test
-              run: cargo llvm-cov --features postgres --lcov --output-path lcov-postgres.info -- store::postgres --ignored --test-threads=1
+              run: cargo llvm-cov --manifest-path crates/zerolease-store-postgres/Cargo.toml --lcov --output-path lcov-postgres.info -- --ignored --test-threads=1
 
             - name: Upload coverage to Codecov
               uses: codecov/codecov-action@v5
               with:
-                  files: lcov-default.info,lcov-postgres.info
+                  files: lcov-workspace.info,lcov-vsock.info,lcov-postgres.info
                   fail_ci_if_error: false
                   token: ${{ secrets.CODECOV_TOKEN }}
