@@ -194,12 +194,41 @@ where
             }
         };
 
-        let response = dispatch(&vault, &request, &peer, &identity).await;
+        let response = dispatch(&vault, request, &peer, &identity).await;
 
         let resp_bytes = serde_json::to_vec(&response)
             .map_err(|e| crate::error::Error::Transport(format!("failed to serialize response: {e}")))?;
         write_frame(&mut writer, &resp_bytes).await?;
     }
+}
+
+/// Parse request params into a typed struct, returning a protocol error on failure.
+macro_rules! parse_params {
+    ($request:expr, $type:ty) => {
+        match serde_json::from_value::<$type>($request.params) {
+            Ok(r) => r,
+            Err(e) => {
+                return Response::protocol_error(
+                    $request.id,
+                    CODE_INVALID_REQUEST,
+                    format!("invalid params: {e}"),
+                );
+            }
+        }
+    };
+}
+
+/// Serialize a vault result into a JSON response.
+macro_rules! json_response {
+    ($id:expr, $result:expr) => {
+        match $result {
+            Ok(value) => match serde_json::to_value(value) {
+                Ok(v) => Response::success($id, v),
+                Err(e) => Response::protocol_error($id, CODE_INVALID_REQUEST, format!("serialization failed: {e}")),
+            },
+            Err(e) => Response::from_error($id, &e),
+        }
+    };
 }
 
 /// Dispatch a single [`Request`] to the appropriate vault method.
@@ -208,7 +237,7 @@ const ADMIN_METHODS: &[&str] = &[methods::STORE_SECRET, methods::DELETE_SECRET, 
 
 pub(crate) async fn dispatch<K, S, A>(
     vault: &Vault<K, S, A>,
-    request: &Request,
+    request: Request,
     peer: &PeerIdentity,
     identity: &ConnectionIdentity,
 ) -> Response
@@ -244,206 +273,105 @@ where
         }
     };
 
+    let id = request.id;
+
     match method {
         methods::STORE_SECRET => {
-            let req: StoreSecretRequest = match serde_json::from_value(request.params.clone()) {
-                Ok(r) => r,
-                Err(e) => {
-                    return Response::protocol_error(request.id, CODE_INVALID_REQUEST, format!("invalid params: {e}"));
-                }
-            };
+            let req = parse_params!(request, StoreSecretRequest);
 
             let plaintext = match base64::engine::general_purpose::STANDARD.decode(&req.plaintext) {
                 Ok(b) => b,
                 Err(e) => {
-                    return Response::protocol_error(request.id, CODE_INVALID_REQUEST, format!("invalid params: {e}"));
+                    return Response::protocol_error(id, CODE_INVALID_REQUEST, format!("invalid base64: {e}"));
                 }
             };
 
             let kind: SecretKind = match serde_json::from_value(req.kind) {
                 Ok(k) => k,
                 Err(e) => {
-                    return Response::protocol_error(request.id, CODE_INVALID_REQUEST, format!("invalid params: {e}"));
+                    return Response::protocol_error(id, CODE_INVALID_REQUEST, format!("invalid kind: {e}"));
                 }
             };
 
-            match vault
-                .store_secret(&SecretName::new(&req.name), &plaintext, kind, req.description, peer)
-                .await
-            {
-                Ok(metadata) => match serde_json::to_value(metadata) {
-                    Ok(v) => Response::success(request.id, v),
-                    Err(e) => {
-                        Response::protocol_error(request.id, CODE_INVALID_REQUEST, format!("invalid params: {e}"))
-                    }
-                },
-                Err(e) => Response::from_error(request.id, &e),
-            }
+            json_response!(
+                id,
+                vault.store_secret(&SecretName::new(&req.name), &plaintext, kind, req.description, peer).await
+            )
         }
 
         methods::REQUEST_LEASE => {
-            let req: RequestLeaseRequest = match serde_json::from_value(request.params.clone()) {
-                Ok(r) => r,
-                Err(e) => {
-                    return Response::protocol_error(request.id, CODE_INVALID_REQUEST, format!("invalid params: {e}"));
-                }
-            };
-
+            let req = parse_params!(request, RequestLeaseRequest);
             let agent = resolve_agent(&req.agent);
-            match vault
-                .request_lease(
-                    &agent,
-                    &SecretName::new(&req.secret_name),
-                    &DomainScope::new(&req.domain),
-                    peer,
-                )
-                .await
-            {
-                Ok(grant) => match serde_json::to_value(grant) {
-                    Ok(v) => Response::success(request.id, v),
-                    Err(e) => {
-                        Response::protocol_error(request.id, CODE_INVALID_REQUEST, format!("invalid params: {e}"))
-                    }
-                },
-                Err(e) => Response::from_error(request.id, &e),
-            }
+            json_response!(
+                id,
+                vault
+                    .request_lease(&agent, &SecretName::new(&req.secret_name), &DomainScope::new(&req.domain), peer)
+                    .await
+            )
         }
 
         methods::ACCESS_SECRET => {
-            let req: AccessSecretRequest = match serde_json::from_value(request.params.clone()) {
-                Ok(r) => r,
-                Err(e) => {
-                    return Response::protocol_error(request.id, CODE_INVALID_REQUEST, format!("invalid params: {e}"));
-                }
-            };
-
+            let req = parse_params!(request, AccessSecretRequest);
             match vault
                 .access_secret(&LeaseId::from_uuid(req.lease_id), &req.target_domain, peer)
                 .await
             {
                 Ok(guard) => {
-                    // Note: the base64-encoded secret lives as a plain String briefly.
-                    // It is consumed by serde_json::to_value immediately below, minimizing
-                    // the window. A Zeroizing wrapper cannot help here because
-                    // AccessSecretResponse owns the String for serialization.
                     let secret = guard.expose(|s| base64::engine::general_purpose::STANDARD.encode(s));
-                    let resp = AccessSecretResponse { secret };
-                    match serde_json::to_value(resp) {
-                        Ok(v) => Response::success(request.id, v),
-                        Err(e) => {
-                            Response::protocol_error(request.id, CODE_INVALID_REQUEST, format!("invalid params: {e}"))
-                        }
-                    }
+                    json_response!(id, Ok::<_, crate::error::Error>(AccessSecretResponse { secret }))
                 }
-                Err(e) => Response::from_error(request.id, &e),
+                Err(e) => Response::from_error(id, &e),
             }
         }
 
         methods::REVOKE_LEASE => {
-            let req: RevokeLeaseRequest = match serde_json::from_value(request.params.clone()) {
-                Ok(r) => r,
-                Err(e) => {
-                    return Response::protocol_error(request.id, CODE_INVALID_REQUEST, format!("invalid params: {e}"));
-                }
-            };
-
+            let req = parse_params!(request, RevokeLeaseRequest);
             let reason: RevocationReason = match serde_json::from_value(req.reason) {
                 Ok(r) => r,
                 Err(e) => {
-                    return Response::protocol_error(request.id, CODE_INVALID_REQUEST, format!("invalid params: {e}"));
+                    return Response::protocol_error(id, CODE_INVALID_REQUEST, format!("invalid reason: {e}"));
                 }
             };
 
-            match vault
-                .revoke_lease(&LeaseId::from_uuid(req.lease_id), reason, peer)
-                .await
-            {
-                Ok(()) => Response::success(request.id, serde_json::json!({})),
-                Err(e) => Response::from_error(request.id, &e),
+            match vault.revoke_lease(&LeaseId::from_uuid(req.lease_id), reason, peer).await {
+                Ok(()) => Response::success(id, serde_json::json!({})),
+                Err(e) => Response::from_error(id, &e),
             }
         }
 
         methods::REVOKE_ALL_FOR_AGENT => {
-            let req: RevokeAllForAgentRequest = match serde_json::from_value(request.params.clone()) {
-                Ok(r) => r,
-                Err(e) => {
-                    return Response::protocol_error(request.id, CODE_INVALID_REQUEST, format!("invalid params: {e}"));
-                }
-            };
-
+            let req = parse_params!(request, RevokeAllForAgentRequest);
             let agent = resolve_agent(&req.agent);
-            match vault.revoke_all_for_agent(&agent, peer).await {
-                Ok(revoked_count) => {
-                    let resp = RevokeAllForAgentResponse { revoked_count };
-                    match serde_json::to_value(resp) {
-                        Ok(v) => Response::success(request.id, v),
-                        Err(e) => {
-                            Response::protocol_error(request.id, CODE_INVALID_REQUEST, format!("invalid params: {e}"))
-                        }
-                    }
-                }
-                Err(e) => Response::from_error(request.id, &e),
-            }
+            json_response!(id, vault.revoke_all_for_agent(&agent, peer).await.map(|count| {
+                RevokeAllForAgentResponse { revoked_count: count }
+            }))
         }
 
-        methods::LIST_SECRETS => match vault.list_secrets().await {
-            Ok(secrets) => {
-                let values: Vec<serde_json::Value> = secrets
-                    .into_iter()
-                    .filter_map(|s| serde_json::to_value(s).ok())
-                    .collect();
-                let resp = ListSecretsResponse { secrets: values };
-                match serde_json::to_value(resp) {
-                    Ok(v) => Response::success(request.id, v),
-                    Err(e) => {
-                        Response::protocol_error(request.id, CODE_INVALID_REQUEST, format!("invalid params: {e}"))
-                    }
-                }
-            }
-            Err(e) => Response::from_error(request.id, &e),
-        },
+        methods::LIST_SECRETS => {
+            json_response!(id, vault.list_secrets().await.map(|secrets| {
+                let values: Vec<serde_json::Value> =
+                    secrets.into_iter().filter_map(|s| serde_json::to_value(s).ok()).collect();
+                ListSecretsResponse { secrets: values }
+            }))
+        }
 
         methods::RENEW_LEASE => {
-            let req: RenewLeaseRequest = match serde_json::from_value(request.params.clone()) {
-                Ok(r) => r,
-                Err(e) => {
-                    return Response::protocol_error(request.id, CODE_INVALID_REQUEST, format!("invalid params: {e}"));
-                }
-            };
-
-            match vault
-                .renew_lease(&LeaseId::from_uuid(req.lease_id), req.extension_secs, peer)
-                .await
-            {
-                Ok(grant) => match serde_json::to_value(grant) {
-                    Ok(v) => Response::success(request.id, v),
-                    Err(e) => {
-                        Response::protocol_error(request.id, CODE_INVALID_REQUEST, format!("invalid params: {e}"))
-                    }
-                },
-                Err(e) => Response::from_error(request.id, &e),
-            }
+            let req = parse_params!(request, RenewLeaseRequest);
+            json_response!(
+                id,
+                vault.renew_lease(&LeaseId::from_uuid(req.lease_id), req.extension_secs, peer).await
+            )
         }
 
         methods::DELETE_SECRET => {
-            let req: DeleteSecretRequest = match serde_json::from_value(request.params.clone()) {
-                Ok(r) => r,
-                Err(e) => {
-                    return Response::protocol_error(request.id, CODE_INVALID_REQUEST, format!("invalid params: {e}"));
-                }
-            };
-
+            let req = parse_params!(request, DeleteSecretRequest);
             match vault.delete_secret(&SecretName::new(&req.name), peer).await {
-                Ok(()) => Response::success(request.id, serde_json::json!({})),
-                Err(e) => Response::from_error(request.id, &e),
+                Ok(()) => Response::success(id, serde_json::json!({})),
+                Err(e) => Response::from_error(id, &e),
             }
         }
 
-        _ => Response::protocol_error(
-            request.id,
-            CODE_INVALID_REQUEST,
-            format!("unknown method: {}", request.method),
-        ),
+        _ => Response::protocol_error(id, CODE_INVALID_REQUEST, format!("unknown method: {}", request.method)),
     }
 }
 
