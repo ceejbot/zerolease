@@ -102,6 +102,8 @@ impl VaultConnector for TcpConnector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::Authenticator;
+    use crate::client::VaultClient;
     use crate::protocol::frame::{read_frame, write_frame};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -147,6 +149,146 @@ mod tests {
         write_frame(&mut writer, b"test payload").await.expect("should write frame");
         let response = read_frame(&mut reader).await.expect("should read response");
         assert_eq!(response, b"response");
+
+        server_task.await.expect("server task should complete");
+    }
+
+    #[tokio::test]
+    async fn client_with_token_handshake() {
+        use std::sync::Arc;
+
+        use crate::auth::{ConnectionIdentity, Role, TokenAuthenticator};
+
+        // Set up a token authenticator with one registered token.
+        let auth = Arc::new(TokenAuthenticator::new());
+        auth.register(
+            "vm-prompt-run-abc",
+            ConnectionIdentity {
+                role: Role::Agent,
+                agent_id: Some(crate::types::AgentId::new("prompt-abc")),
+                label: "test-vm".to_string(),
+            },
+        );
+
+        let listener = TcpListener::bind(0).await.expect("should bind");
+        let addr = listener.local_addr().expect("should have addr");
+
+        // Spawn a server that accepts one connection using handle_connection.
+        // We need a vault — use a minimal mock. Since we're just testing the
+        // handshake + auth, the server will accept and then the client
+        // disconnects (triggering clean EOF in the request loop).
+        let auth_clone = auth.clone();
+        let server_task = tokio::spawn(async move {
+            let (stream, peer) = listener.accept().await.expect("should accept");
+
+            // We can't easily construct a Vault without real backends,
+            // so test at the transport + auth layer: manually do the
+            // handshake and auth check.
+            let (mut reader, mut writer) = tokio::io::split(stream);
+
+            // Read ClientHello
+            let hello_bytes = read_frame(&mut reader).await.expect("should read hello");
+            let hello: crate::protocol::ClientHello =
+                serde_json::from_slice(&hello_bytes).expect("should parse hello");
+
+            // Verify token is present
+            assert_eq!(
+                hello.token.as_deref(),
+                Some("vm-prompt-run-abc"),
+                "ClientHello should contain the token"
+            );
+
+            // Enrich peer identity with token hash
+            let mut peer = peer;
+            if let Some(ref t) = hello.token {
+                peer.set_token_hash(crate::transport::hash_token(t));
+            }
+
+            // Authenticate
+            let identity = auth_clone
+                .authenticate(&peer, hello.token.as_deref())
+                .await
+                .expect("should authenticate with valid token");
+
+            assert_eq!(identity.role, Role::Agent, "role should be Agent");
+            assert_eq!(
+                identity.agent_id.as_ref().expect("should have agent_id").as_str(),
+                "prompt-abc",
+                "agent should match registration"
+            );
+
+            // Send ServerHello accept
+            let accept = crate::protocol::ServerHello::accept(hello.version);
+            let bytes = serde_json::to_vec(&accept).expect("should serialize");
+            write_frame(&mut writer, &bytes).await.expect("should write");
+
+            // Client will disconnect; read EOF
+            let result = read_frame(&mut reader).await;
+            assert!(result.is_err(), "should get EOF after client disconnect");
+        });
+
+        // Client connects with token
+        let connector = TcpConnector::new(addr, "vm-prompt-run-abc");
+        let client = VaultClient::<TcpConnector>::connect_with_token(&connector, connector.token()).await;
+        assert!(client.is_ok(), "client handshake should succeed");
+
+        // Drop client to trigger server-side EOF
+        drop(client);
+
+        server_task.await.expect("server task should complete");
+    }
+
+    #[tokio::test]
+    async fn token_auth_rejects_bad_token() {
+        use std::sync::Arc;
+
+        use crate::auth::{ConnectionIdentity, Role, TokenAuthenticator};
+
+        let auth = Arc::new(TokenAuthenticator::new());
+        auth.register(
+            "good-token",
+            ConnectionIdentity {
+                role: Role::Agent,
+                agent_id: None,
+                label: "test".to_string(),
+            },
+        );
+
+        let listener = TcpListener::bind(0).await.expect("should bind");
+        let addr = listener.local_addr().expect("should have addr");
+
+        let auth_clone = auth.clone();
+        let server_task = tokio::spawn(async move {
+            let (stream, peer) = listener.accept().await.expect("should accept");
+            let (mut reader, mut writer) = tokio::io::split(stream);
+
+            let hello_bytes = read_frame(&mut reader).await.expect("should read hello");
+            let hello: crate::protocol::ClientHello =
+                serde_json::from_slice(&hello_bytes).expect("should parse hello");
+
+            let result = auth_clone
+                .authenticate(&peer, hello.token.as_deref())
+                .await;
+
+            assert!(result.is_none(), "should reject bad token");
+
+            // Send reject
+            let reject = crate::protocol::ServerHello::reject("invalid token");
+            let bytes = serde_json::to_vec(&reject).expect("should serialize");
+            write_frame(&mut writer, &bytes).await.expect("should write");
+        });
+
+        let connector = TcpConnector::new(addr, "wrong-token");
+        let result = VaultClient::<TcpConnector>::connect_with_token(&connector, connector.token()).await;
+        // The server rejects, but VaultClient sees "handshake rejected" since
+        // the server sends a ServerHello::reject.
+        match result {
+            Ok(_) => panic!("client should get handshake rejection, but connected successfully"),
+            Err(e) => {
+                let msg = e.to_string();
+                assert!(msg.contains("rejected"), "error should mention rejection: {msg}");
+            }
+        }
 
         server_task.await.expect("server task should complete");
     }
