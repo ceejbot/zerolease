@@ -25,6 +25,7 @@ pub struct CredentialGuard {
 
 impl CredentialGuard {
     /// Create a guard backed by a vault lease with a revocation channel.
+    #[allow(dead_code)] // we have library users
     pub(crate) fn new(
         secret: SecretString,
         lease_id: Uuid,
