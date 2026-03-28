@@ -71,14 +71,30 @@ pub enum CipherAlgorithm {
 }
 
 impl CipherAlgorithm {
-    /// Serialize to a JSON string for database storage.
-    pub fn to_db_string(&self) -> String {
-        serde_json::to_string(self).expect("CipherAlgorithm serialization is infallible")
+    /// Plain-string representation for database storage.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Aes256Gcm => "aes256gcm",
+            Self::XChaCha20Poly1305 => "xchacha20poly1305",
+        }
     }
 
-    /// Deserialize from a JSON string read from the database.
-    pub fn from_db_string(s: &str) -> Result<Self> {
-        serde_json::from_str(s).map_err(|e| crate::error::Error::Storage(format!("invalid algorithm value: {e}")))
+    /// Parse from a database string.
+    pub fn parse_db(s: &str) -> Result<Self> {
+        match s {
+            "aes256gcm" => Ok(Self::Aes256Gcm),
+            "xchacha20poly1305" => Ok(Self::XChaCha20Poly1305),
+            // Accept legacy JSON-quoted values for backward compatibility.
+            "\"Aes256Gcm\"" => Ok(Self::Aes256Gcm),
+            "\"XChaCha20Poly1305\"" => Ok(Self::XChaCha20Poly1305),
+            other => Err(crate::error::Error::Storage(format!("unknown algorithm: {other}"))),
+        }
+    }
+}
+
+impl std::fmt::Display for CipherAlgorithm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -108,14 +124,58 @@ pub enum SecretKind {
 }
 
 impl SecretKind {
-    /// Serialize to a JSON string for database storage.
-    pub fn to_db_string(&self) -> String {
-        serde_json::to_string(self).expect("SecretKind serialization is infallible")
+    /// Plain-string discriminant for database storage.
+    ///
+    /// Only the variant name is stored; variant data (e.g., OAuth2's
+    /// refresh token fields) lives in the secret blob itself.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pat => "pat",
+            Self::OAuth2 { .. } => "oauth2",
+            Self::ApiKey => "apikey",
+            Self::BasicAuth => "basicauth",
+            Self::SshKey => "sshkey",
+            Self::ClientCert => "clientcert",
+            Self::Opaque => "opaque",
+        }
     }
 
-    /// Deserialize from a JSON string read from the database.
-    pub fn from_db_string(s: &str) -> Result<Self> {
-        serde_json::from_str(s).map_err(|e| crate::error::Error::Storage(format!("invalid kind value: {e}")))
+    /// Parse from a database string. Returns the variant with default
+    /// (empty) inner fields — callers populate variant data separately.
+    pub fn parse_db(s: &str) -> Result<Self> {
+        match s {
+            "pat" => Ok(Self::Pat),
+            "oauth2" => Ok(Self::OAuth2 {
+                refresh_ciphertext: None,
+                refresh_nonce: None,
+            }),
+            "apikey" => Ok(Self::ApiKey),
+            "basicauth" => Ok(Self::BasicAuth),
+            "sshkey" => Ok(Self::SshKey),
+            "clientcert" => Ok(Self::ClientCert),
+            "opaque" => Ok(Self::Opaque),
+            // Accept legacy JSON-quoted values for backward compatibility.
+            other if other.starts_with('"') => {
+                let unquoted = other.trim_matches('"');
+                // Legacy format used PascalCase variant names.
+                match unquoted {
+                    "Pat" => Ok(Self::Pat),
+                    "ApiKey" => Ok(Self::ApiKey),
+                    "BasicAuth" => Ok(Self::BasicAuth),
+                    "SshKey" => Ok(Self::SshKey),
+                    "ClientCert" => Ok(Self::ClientCert),
+                    "Opaque" => Ok(Self::Opaque),
+                    _ => Err(crate::error::Error::Storage(format!("unknown kind: {other}"))),
+                }
+            }
+            other => Err(crate::error::Error::Storage(format!("unknown kind: {other}"))),
+        }
+    }
+}
+
+impl std::fmt::Display for SecretKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 

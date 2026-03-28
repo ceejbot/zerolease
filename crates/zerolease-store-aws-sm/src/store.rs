@@ -108,8 +108,8 @@ impl SecretPayload {
             name: s.name.as_str().to_string(),
             ciphertext: s.ciphertext.clone(),
             nonce: s.nonce.clone(),
-            algorithm: s.algorithm.to_db_string().to_string(),
-            kind: s.kind.to_db_string().to_string(),
+            algorithm: s.algorithm.as_str().to_owned(),
+            kind: s.kind.as_str().to_owned(),
             description: s.description.clone(),
             created_at: s.created_at,
             updated_at: s.updated_at,
@@ -124,8 +124,8 @@ impl SecretPayload {
             name: SecretName::new(self.name),
             ciphertext: self.ciphertext,
             nonce: self.nonce,
-            algorithm: CipherAlgorithm::from_db_string(&self.algorithm)?,
-            kind: SecretKind::from_db_string(&self.kind)?,
+            algorithm: CipherAlgorithm::parse_db(&self.algorithm)?,
+            kind: SecretKind::parse_db(&self.kind)?,
             description: self.description,
             created_at: self.created_at,
             updated_at: self.updated_at,
@@ -135,17 +135,11 @@ impl SecretPayload {
 
     /// Build AWS tags for metadata that `list()` can read without
     /// fetching the secret value.
-    /// Build AWS tags for metadata that `list()` can read without
-    /// fetching the secret value.
-    ///
-    /// Note: `kind` is stored as a JSON string by `to_db_string()`
-    /// (e.g., `"\"Pat\""`). We strip the surrounding quotes for tag
-    /// values since tags are plain strings.
     fn metadata_tags(&self) -> Vec<Tag> {
         let tag = |key: MetadataTag, value: &str| Tag::builder().key(key.key()).value(value).build();
 
         let mut tags = vec![
-            tag(MetadataTag::Kind, self.kind.trim_matches('"')),
+            tag(MetadataTag::Kind, &self.kind),
             tag(MetadataTag::Version, &self.version.to_string()),
             tag(MetadataTag::UpdatedAt, &self.updated_at.to_rfc3339()),
             tag(MetadataTag::CreatedAt, &self.created_at.to_rfc3339()),
@@ -439,11 +433,8 @@ impl SecretStore for AwsSecretsManagerStore {
                 // Read metadata from tags instead of fetching the secret value.
                 let tags = secret.tags();
 
-                // Tag values are bare strings (e.g., "Pat"), but from_db_string
-                // expects JSON (e.g., "\"Pat\""), so re-wrap.
                 let kind_tag = MetadataTag::Kind.find(tags).unwrap_or_default();
-                let kind_str = format!("\"{kind_tag}\"");
-                let kind = match SecretKind::from_db_string(&kind_str) {
+                let kind = match SecretKind::parse_db(&kind_tag) {
                     Ok(k) => k,
                     Err(e) => {
                         tracing::warn!(

@@ -52,8 +52,8 @@ impl SecretStore for RusqliteStore {
 
         let id_str = id.as_uuid().to_string();
         let name_str = params.name.as_str().to_string();
-        let algorithm_str = params.algorithm.to_db_string();
-        let kind_str = params.kind.to_db_string();
+        let algorithm_str = params.algorithm.as_str().to_owned();
+        let kind_str = params.kind.as_str().to_owned();
         let now_str = now.to_rfc3339();
         let ciphertext = params.ciphertext.clone();
         let nonce = params.nonce.clone();
@@ -131,7 +131,7 @@ impl SecretStore for RusqliteStore {
         let conn = Arc::clone(&self.conn);
         let name_str = name.as_str().to_string();
         let now_str = Utc::now().to_rfc3339();
-        let algorithm_str = algorithm.to_db_string();
+        let algorithm_str = algorithm.as_str().to_owned();
         let name_clone = name.clone();
 
         tokio::task::spawn_blocking(move || {
@@ -178,7 +178,7 @@ impl SecretStore for RusqliteStore {
             for item in &updates {
                 let name_str = item.name.as_str().to_string();
                 let now_str = Utc::now().to_rfc3339();
-                let algorithm_str = item.algorithm.to_db_string();
+                let algorithm_str = item.algorithm.as_str().to_owned();
 
                 let rows = tx
                     .execute(
@@ -267,8 +267,8 @@ fn row_to_stored_secret(row: &rusqlite::Row<'_>) -> Result<StoredSecret> {
         name: SecretName::new(name_str),
         ciphertext,
         nonce,
-        algorithm: CipherAlgorithm::from_db_string(&algorithm_str)?,
-        kind: SecretKind::from_db_string(&kind_str)?,
+        algorithm: CipherAlgorithm::parse_db(&algorithm_str)?,
+        kind: SecretKind::parse_db(&kind_str)?,
         description,
         created_at: chrono::DateTime::parse_from_rfc3339(&created_at_str)
             .map_err(|e| Error::Storage(format!("invalid created_at: {e}")))?
@@ -293,7 +293,7 @@ fn row_to_metadata(row: &rusqlite::Row<'_>) -> Result<SecretMetadata> {
     Ok(SecretMetadata {
         id: SecretId::from_uuid(id_uuid),
         name: SecretName::new(name_str),
-        kind: SecretKind::from_db_string(&kind_str)?,
+        kind: SecretKind::parse_db(&kind_str)?,
         description,
         created_at: chrono::DateTime::parse_from_rfc3339(&created_at_str)
             .map_err(|e| Error::Storage(format!("invalid created_at: {e}")))?
