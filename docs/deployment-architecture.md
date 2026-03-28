@@ -69,6 +69,7 @@ Claw → zerolease vault: register token "prompt-run-001"
 ### 3. The Claw boots the VM stack
 
 A QEMU VM is started with:
+
 - A pre-baked development environment (language runtimes, database, etc.)
 - The prompt-run token injected at boot (via cloud-init or QEMU `-fw_cfg`)
 - Network configured so the VM can reach the host vault via a forwarded port
@@ -144,14 +145,14 @@ sequenceDiagram
 
 ## What Lives Where
 
-| Component | Runs on | Provided by |
-|-----------|---------|-------------|
-| zerolease vault | Host (AWS instance) | zerolease core + store crate |
-| Token management | Host | The Claw (implements `Authenticator`) |
-| TCP listener | Host, port 9100 | zerolease `TcpListener` |
-| CLI wrapper | Guest (QEMU VM) | Custom binary using `zerolease-provider` |
-| Claude Code | Guest (QEMU VM) | Anthropic |
-| Dev environment | Guest (QEMU VM) | Pre-baked VM image |
+| Component        | Runs on             | Provided by                              |
+| ---------------- | ------------------- | ---------------------------------------- |
+| zerolease vault  | Host (AWS instance) | zerolease core + store crate             |
+| Token management | Host                | The Claw (implements `Authenticator`)    |
+| TCP listener     | Host, port 9100     | zerolease `TcpListener`                  |
+| CLI wrapper      | Guest (QEMU VM)     | Custom binary using `zerolease-provider` |
+| Claude Code      | Guest (QEMU VM)     | Anthropic                                |
+| Dev environment  | Guest (QEMU VM)     | Pre-baked VM image                       |
 
 ## Open Questions
 

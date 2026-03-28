@@ -101,11 +101,12 @@ impl VaultConnector for TcpConnector {
 
 #[cfg(test)]
 mod tests {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
     use super::*;
     use crate::auth::Authenticator;
     use crate::client::VaultClient;
     use crate::protocol::frame::{read_frame, write_frame};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[tokio::test]
     async fn listener_binds_and_accepts() {
@@ -146,7 +147,9 @@ mod tests {
 
         let stream = connector.connect().await.expect("should connect");
         let (mut reader, mut writer) = tokio::io::split(stream);
-        write_frame(&mut writer, b"test payload").await.expect("should write frame");
+        write_frame(&mut writer, b"test payload")
+            .await
+            .expect("should write frame");
         let response = read_frame(&mut reader).await.expect("should read response");
         assert_eq!(response, b"response");
 
@@ -188,8 +191,7 @@ mod tests {
 
             // Read ClientHello
             let hello_bytes = read_frame(&mut reader).await.expect("should read hello");
-            let hello: crate::protocol::ClientHello =
-                serde_json::from_slice(&hello_bytes).expect("should parse hello");
+            let hello: crate::protocol::ClientHello = serde_json::from_slice(&hello_bytes).expect("should parse hello");
 
             // Verify token is present
             assert_eq!(
@@ -263,12 +265,9 @@ mod tests {
             let (mut reader, mut writer) = tokio::io::split(stream);
 
             let hello_bytes = read_frame(&mut reader).await.expect("should read hello");
-            let hello: crate::protocol::ClientHello =
-                serde_json::from_slice(&hello_bytes).expect("should parse hello");
+            let hello: crate::protocol::ClientHello = serde_json::from_slice(&hello_bytes).expect("should parse hello");
 
-            let result = auth_clone
-                .authenticate(&peer, hello.token.as_deref())
-                .await;
+            let result = auth_clone.authenticate(&peer, hello.token.as_deref()).await;
 
             assert!(result.is_none(), "should reject bad token");
 

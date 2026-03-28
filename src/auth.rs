@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 use std::sync::RwLock;
 
-use crate::transport::{hash_token, PeerIdentity, TokenHash};
+use crate::transport::{PeerIdentity, TokenHash, hash_token};
 use crate::types::AgentId;
 
 /// The role assigned to an authenticated connection.
@@ -59,11 +59,7 @@ pub trait Authenticator: Send + Sync + 'static {
     ///
     /// Returns `Some(identity)` to accept the connection with the given
     /// role and identity, or `None` to reject it entirely.
-    async fn authenticate(
-        &self,
-        peer: &PeerIdentity,
-        token: Option<&str>,
-    ) -> Option<ConnectionIdentity>;
+    async fn authenticate(&self, peer: &PeerIdentity, token: Option<&str>) -> Option<ConnectionIdentity>;
 }
 
 /// An authenticator that grants admin access to all connections.
@@ -73,11 +69,7 @@ pub struct AllowAllAdmin;
 
 #[async_trait::async_trait]
 impl Authenticator for AllowAllAdmin {
-    async fn authenticate(
-        &self,
-        _peer: &PeerIdentity,
-        _token: Option<&str>,
-    ) -> Option<ConnectionIdentity> {
+    async fn authenticate(&self, _peer: &PeerIdentity, _token: Option<&str>) -> Option<ConnectionIdentity> {
         Some(ConnectionIdentity {
             role: Role::Admin,
             agent_id: None,
@@ -112,10 +104,7 @@ impl TokenAuthenticator {
     /// The raw token is hashed immediately and not stored.
     pub fn register(&self, token: &str, identity: ConnectionIdentity) {
         let hash = hash_token(token);
-        self.tokens
-            .write()
-            .expect("token lock poisoned")
-            .insert(hash, identity);
+        self.tokens.write().expect("token lock poisoned").insert(hash, identity);
     }
 
     /// Revoke a previously registered token. Returns `true` if the
@@ -138,18 +127,10 @@ impl Default for TokenAuthenticator {
 
 #[async_trait::async_trait]
 impl Authenticator for TokenAuthenticator {
-    async fn authenticate(
-        &self,
-        _peer: &PeerIdentity,
-        token: Option<&str>,
-    ) -> Option<ConnectionIdentity> {
+    async fn authenticate(&self, _peer: &PeerIdentity, token: Option<&str>) -> Option<ConnectionIdentity> {
         let raw = token?;
         let hash = hash_token(raw);
-        self.tokens
-            .read()
-            .expect("token lock poisoned")
-            .get(&hash)
-            .cloned()
+        self.tokens.read().expect("token lock poisoned").get(&hash).cloned()
     }
 }
 
@@ -190,10 +171,7 @@ mod tests {
         assert!(id.is_some(), "should accept registered token");
         let id = id.expect("identity");
         assert_eq!(id.role, Role::Agent);
-        assert_eq!(
-            id.agent_id.as_ref().expect("agent_id").as_str(),
-            "test-agent"
-        );
+        assert_eq!(id.agent_id.as_ref().expect("agent_id").as_str(), "test-agent");
     }
 
     #[tokio::test]
@@ -208,9 +186,7 @@ mod tests {
             },
         );
 
-        let id = auth
-            .authenticate(&PeerIdentity::Anonymous, Some("wrong-token"))
-            .await;
+        let id = auth.authenticate(&PeerIdentity::Anonymous, Some("wrong-token")).await;
         assert!(id.is_none(), "should reject unregistered token");
     }
 
@@ -229,9 +205,7 @@ mod tests {
         assert!(auth.revoke("temp-token"), "revoke should return true for known token");
         assert!(!auth.revoke("temp-token"), "second revoke should return false");
 
-        let id = auth
-            .authenticate(&PeerIdentity::Anonymous, Some("temp-token"))
-            .await;
+        let id = auth.authenticate(&PeerIdentity::Anonymous, Some("temp-token")).await;
         assert!(id.is_none(), "should reject revoked token");
     }
 }

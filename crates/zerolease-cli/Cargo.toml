@@ -1,0 +1,34 @@
+[package]
+name = "zerolease-cli"
+version = "0.1.0"
+description = "CLI wrapper that acquires zerolease credentials for Claude Code agents"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "zerolease-cli"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+secrecy = { workspace = true }
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+zerolease = { workspace = true, default-features = false }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", features = ["process"] }
+
+# Can't use workspace lints because this binary needs unsafe for execvp.
+[lints.rust]
+unsafe_code = "allow"
+future_incompatible = { level = "deny", priority = 1 }
+rust_2018_idioms = { level = "warn", priority = 2 }
+
+[lints.clippy]
+unwrap_used = "deny"

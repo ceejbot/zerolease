@@ -64,10 +64,7 @@ pub enum PeerIdentity {
 
     /// TCP peer: socket address and SHA-256 hash of the auth token.
     /// The raw token is never stored here — only its hash for audit.
-    Tcp {
-        addr: SocketAddr,
-        token_hash: TokenHash,
-    },
+    Tcp { addr: SocketAddr, token_hash: TokenHash },
 
     /// Unknown or unauthenticated peer (e.g., during testing).
     Anonymous,
