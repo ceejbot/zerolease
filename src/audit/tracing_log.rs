@@ -39,6 +39,7 @@ impl Default for TracingAuditLog {
 impl AuditLog for TracingAuditLog {
     async fn record(&self, entry: AuditEntry) -> Result<()> {
         let (secret_name, lease_id) = entry.event.indexed_fields();
+        let lease_id_str = lease_id.map(|id| id.as_uuid().to_string());
         let event_json = serde_json::to_string(&entry.event)
             .map_err(|e| Error::Storage(format!("failed to serialize audit event: {e}")))?;
         let outcome_json = serde_json::to_string(&entry.outcome)
@@ -52,8 +53,8 @@ impl AuditLog for TracingAuditLog {
             peer_identity = %entry.peer_identity,
             event = %event_json,
             outcome = %outcome_json,
-            secret_name = secret_name.as_deref().unwrap_or(""),
-            lease_id = lease_id.as_deref().unwrap_or(""),
+            secret_name = secret_name.unwrap_or(""),
+            lease_id = lease_id_str.as_deref().unwrap_or(""),
             "audit"
         );
         Ok(())

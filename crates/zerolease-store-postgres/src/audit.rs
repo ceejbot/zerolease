@@ -67,6 +67,7 @@ fn row_to_audit_entry(row: &sqlx::postgres::PgRow) -> Result<AuditEntry> {
 impl AuditLog for PostgresAuditLog {
     async fn record(&self, entry: AuditEntry) -> Result<()> {
         let (secret_name, lease_id) = entry.event.indexed_fields();
+        let lease_id_str = lease_id.map(|id| id.as_uuid().to_string());
         let event_id_str = entry.event_id.to_string();
         let event_str = serde_json::to_string(&entry.event)
             .map_err(|e| Error::Storage(format!("failed to serialize event: {e}")))?;
@@ -84,8 +85,8 @@ impl AuditLog for PostgresAuditLog {
         .bind(&agent_str)
         .bind(&entry.peer_identity)
         .bind(&outcome_str)
-        .bind(&secret_name)
-        .bind(&lease_id)
+        .bind(secret_name)
+        .bind(&lease_id_str)
         .execute(&self.pool)
         .await
         .map_err(|e| Error::Storage(format!("failed to insert audit event: {e}")))?;

@@ -104,6 +104,8 @@ fn query_rows(conn: &Connection, sql: &str, params: &[&dyn rusqlite::types::ToSq
 impl AuditLog for RusqliteAuditLog {
     async fn record(&self, entry: AuditEntry) -> Result<()> {
         let (secret_name, lease_id) = entry.event.indexed_fields();
+        let secret_name = secret_name.map(|s| s.to_owned());
+        let lease_id = lease_id.map(|id| id.as_uuid().to_string());
         let event_id_str = entry.event_id.to_string();
         let timestamp_str = entry.timestamp.to_rfc3339();
         let event_str = serde_json::to_string(&entry.event)
