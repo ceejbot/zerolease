@@ -149,8 +149,19 @@ where
         .map_err(|e| crate::error::Error::Transport(format!("failed to serialize ServerHello: {e}")))?;
     write_frame(&mut writer, &bytes).await?;
 
+    // --- Token extraction ---
+    // If the client presented a token (TCP transports), hash it into
+    // the PeerIdentity for audit and pass the raw value to the
+    // authenticator for validation.
+    let mut peer = peer;
+    let token = hello.token;
+    if let Some(ref t) = token {
+        let hash = crate::transport::hash_token(t);
+        peer.set_token_hash(hash);
+    }
+
     // --- Authentication ---
-    let identity = match authenticator.authenticate(&peer).await {
+    let identity = match authenticator.authenticate(&peer, token.as_deref()).await {
         Some(id) => {
             tracing::info!(
                 role = ?id.role,
