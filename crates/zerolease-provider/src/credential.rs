@@ -10,6 +10,7 @@
 use secrecy::{ExposeSecret, SecretString};
 use tokio::sync::mpsc;
 use uuid::Uuid;
+use zerolease::types::DomainScope;
 
 /// A handle to an active credential. The secret value is accessible
 /// only through [`expose()`](Self::expose) and is zeroized when this
@@ -19,7 +20,7 @@ use uuid::Uuid;
 pub struct CredentialGuard {
     secret: SecretString,
     lease_id: Uuid,
-    target_domain: String,
+    target_domain: DomainScope,
     revoke_tx: Option<mpsc::Sender<Uuid>>,
 }
 
@@ -29,7 +30,7 @@ impl CredentialGuard {
     pub(crate) fn new(
         secret: SecretString,
         lease_id: Uuid,
-        target_domain: String,
+        target_domain: DomainScope,
         revoke_tx: mpsc::Sender<Uuid>,
     ) -> Self {
         Self {
@@ -41,7 +42,7 @@ impl CredentialGuard {
     }
 
     /// Create a guard with no revocation channel (for static/test providers).
-    pub(crate) fn new_static(secret: SecretString, target_domain: String) -> Self {
+    pub(crate) fn new_static(secret: SecretString, target_domain: DomainScope) -> Self {
         Self {
             secret,
             lease_id: Uuid::now_v7(),
@@ -60,7 +61,7 @@ impl CredentialGuard {
     }
 
     /// The domain this credential is scoped to.
-    pub fn target_domain(&self) -> &str {
+    pub fn target_domain(&self) -> &DomainScope {
         &self.target_domain
     }
 

@@ -124,26 +124,24 @@ pub enum AuditEvent {
 
 impl AuditEvent {
     /// Extract denormalized `secret_name` and `lease_id` for database indexing.
-    pub fn indexed_fields(&self) -> (Option<String>, Option<String>) {
+    ///
+    /// Returns borrowed references to avoid heap allocations on every
+    /// audit event. Callers that need owned strings (e.g., SQL binds)
+    /// can `.to_owned()` at the point of use.
+    pub fn indexed_fields(&self) -> (Option<&str>, Option<&LeaseId>) {
         match self {
             Self::LeaseGranted {
                 secret_name, lease_id, ..
-            } => (
-                Some(secret_name.as_str().to_string()),
-                Some(lease_id.as_uuid().to_string()),
-            ),
+            } => (Some(secret_name.as_str()), Some(lease_id)),
             Self::SecretAccessed {
                 secret_name, lease_id, ..
-            } => (
-                Some(secret_name.as_str().to_string()),
-                Some(lease_id.as_uuid().to_string()),
-            ),
-            Self::LeaseRevoked { lease_id, .. } => (None, Some(lease_id.as_uuid().to_string())),
-            Self::LeaseRenewed { lease_id, .. } => (None, Some(lease_id.as_uuid().to_string())),
-            Self::AccessDenied { secret_name, .. } => (Some(secret_name.as_str().to_string()), None),
-            Self::SecretStored { secret_name } => (Some(secret_name.as_str().to_string()), None),
-            Self::SecretRotated { secret_name, .. } => (Some(secret_name.as_str().to_string()), None),
-            Self::SecretDeleted { secret_name } => (Some(secret_name.as_str().to_string()), None),
+            } => (Some(secret_name.as_str()), Some(lease_id)),
+            Self::LeaseRevoked { lease_id, .. } => (None, Some(lease_id)),
+            Self::LeaseRenewed { lease_id, .. } => (None, Some(lease_id)),
+            Self::AccessDenied { secret_name, .. } => (Some(secret_name.as_str()), None),
+            Self::SecretStored { secret_name } => (Some(secret_name.as_str()), None),
+            Self::SecretRotated { secret_name, .. } => (Some(secret_name.as_str()), None),
+            Self::SecretDeleted { secret_name } => (Some(secret_name.as_str()), None),
             Self::DekRotated | Self::PolicyReloaded { .. } => (None, None),
         }
     }

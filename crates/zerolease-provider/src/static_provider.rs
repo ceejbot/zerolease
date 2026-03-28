@@ -12,6 +12,7 @@
 use std::collections::HashMap;
 
 use secrecy::SecretString;
+use zerolease::types::SecretName;
 
 use crate::credential::CredentialGuard;
 use crate::error::ProviderError;
@@ -19,10 +20,10 @@ use crate::provider::{CredentialProvider, CredentialRequest};
 
 /// An in-memory credential provider backed by a `HashMap`.
 ///
-/// Credentials are keyed by `secret_name`. Domain and agent checks
+/// Credentials are keyed by `SecretName`. Domain and agent checks
 /// are not enforced (this is a test/migration helper, not a vault).
 pub struct StaticProvider {
-    credentials: HashMap<String, SecretString>,
+    credentials: HashMap<SecretName, SecretString>,
 }
 
 impl StaticProvider {
@@ -34,9 +35,9 @@ impl StaticProvider {
     }
 
     /// Insert a credential. Overwrites any existing value for the key.
-    pub fn insert(&mut self, secret_name: impl Into<String>, value: impl Into<String>) {
+    pub fn insert(&mut self, secret_name: SecretName, value: impl Into<String>) {
         self.credentials
-            .insert(secret_name.into(), SecretString::from(value.into()));
+            .insert(secret_name, SecretString::from(value.into()));
     }
 }
 
@@ -52,7 +53,7 @@ impl CredentialProvider for StaticProvider {
         let secret = self
             .credentials
             .get(&request.secret_name)
-            .ok_or_else(|| ProviderError::Unavailable(format!("no such secret: {}", request.secret_name)))?;
+            .ok_or_else(|| ProviderError::Unavailable(format!("no such secret: {}", request.secret_name.as_str())))?;
 
         // Clone the secret value into a new guard. StaticProvider guards
         // have no revocation channel — drop just zeroizes.

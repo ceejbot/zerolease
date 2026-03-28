@@ -53,13 +53,17 @@ impl CredentialProvider for ZeroleaseProvider {
 
         // Request a lease
         let grant = client
-            .request_lease(&request.agent_id, &request.secret_name, &request.target_domain)
+            .request_lease(
+                request.agent_id.as_str(),
+                request.secret_name.as_str(),
+                request.target_domain.as_str(),
+            )
             .await
             .map_err(|e| ProviderError::Unavailable(e.to_string()))?;
 
         // Access the secret through the lease
         let secret_bytes = client
-            .access_secret(*grant.lease_id.as_uuid(), &request.target_domain)
+            .access_secret(*grant.lease_id.as_uuid(), request.target_domain.as_str())
             .await
             .map_err(|e| ProviderError::Unavailable(e.to_string()))?;
 
@@ -86,11 +90,11 @@ async fn revocation_worker(socket_path: PathBuf, mut rx: mpsc::Receiver<Uuid>) {
                 if let Err(e) = client.revoke_lease(lease_id, RevocationReason::AdminRevoked).await {
                     // Best-effort: log and continue. The lease has a TTL
                     // and will expire on its own.
-                    eprintln!("warning: failed to revoke lease {lease_id}: {e}");
+                    tracing::warn!(%lease_id, error = %e, "failed to revoke lease");
                 }
             }
             Err(e) => {
-                eprintln!("warning: could not connect for lease revocation: {e}");
+                tracing::warn!(error = %e, "could not connect for lease revocation");
             }
         }
     }

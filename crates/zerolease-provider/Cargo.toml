@@ -12,11 +12,12 @@ async-trait.workspace = true
 secrecy.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync", "rt"] }
+tracing = "0.1"
 uuid.workspace = true
-zerolease = { workspace = true, default-features = false, optional = true }
+zerolease = { workspace = true, default-features = false }
 
 [features]
-vault = ["dep:zerolease"]
+vault = []
 
 [lints]
 workspace = true

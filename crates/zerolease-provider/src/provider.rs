@@ -6,6 +6,8 @@
 //! handle to a secret. This replaces the static `String` credential
 //! fields that tools typically store for their entire process lifetime.
 
+use zerolease::types::{AgentId, DomainScope, SecretName};
+
 use crate::credential::CredentialGuard;
 use crate::error::ProviderError;
 
@@ -13,12 +15,12 @@ use crate::error::ProviderError;
 #[derive(Debug, Clone)]
 pub struct CredentialRequest {
     /// Which secret to access (e.g., "jira-api-token").
-    pub secret_name: String,
+    pub secret_name: SecretName,
     /// The domain this credential will be used against (e.g.,
     /// "mycompany.atlassian.net").
-    pub target_domain: String,
+    pub target_domain: DomainScope,
     /// Identity of the requesting agent.
-    pub agent_id: String,
+    pub agent_id: AgentId,
 }
 
 /// A provider that acquires credentials from a vault on behalf of tools.
