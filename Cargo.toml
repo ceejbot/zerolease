@@ -1,57 +1,18 @@
-[package]
-name = "zerolease"
-authors = ["C J Silverio <ceejceej@gmail.com>"]
-version = "0.1.0"
+[workspace]
+members = [".", "crates/zerolease-provider", "crates/zerolease-store-rusqlite"]
+# zerolease-store-postgres excluded from default workspace due to sqlx v0.8
+# libsqlite3-sys conflict with rusqlite. Build/test it separately:
+#   cargo check -p zerolease-store-postgres --manifest-path crates/zerolease-store-postgres/Cargo.toml
+exclude = ["crates/zerolease-store-postgres"]
+resolver = "3"
+
+[workspace.package]
 edition = "2024"
-description = "A lightweight, agent-aware credential vault with lease-based access control"
+authors = ["C J Silverio <ceejceej@gmail.com>"]
 license = "Apache-2.0"
 repository = "https://github.com/ceejbot/zerolease"
-keywords = ["credentials", "vault", "security", "agents", "secrets"]
-readme = "README.md"
-categories = ["authentication", "cryptography"]
 
-[dependencies]
-aes-gcm = "0.10"
-async-trait = "0.1"
-aws-config = { version = "1", optional = true }
-aws-sdk-kms = { version = "1", optional = true }
-base64 = "0.22"
-chacha20poly1305 = "0.10"
-chrono = { version = "0.4", features = ["serde"] }
-secrecy = { version = "0.10", features = ["serde"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "2"
-tokio = { version = "1", features = ["full"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-uuid = { version = "1", features = ["v7", "serde"] }
-zeroize = { version = "1.8", features = ["derive"] }
-
-[dependencies.sqlx]
-version = "0.8"
-features = ["runtime-tokio", "sqlite", "postgres", "chrono", "uuid"]
-optional = true
-
-[features]
-default = ["sqlite"]
-sqlite = ["sqlx"]
-postgres = ["sqlx"]
-vsock = ["tokio-vsock"]
-kms = ["aws-sdk-kms", "aws-config"]
-
-[target.'cfg(unix)'.dependencies]
-# OS keychain (Linux secret-service, macOS Keychain)
-keyring = "3.6"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-# vsock for QEMU and Firecracker host-guest communication
-tokio-vsock = { version = "0.7", optional = true }
-
-[dev-dependencies]
-tempfile = "3"
-
-[lints.rust]
+[workspace.lints.rust]
 unsafe_code = { level = "deny", priority = 0 }
 future_incompatible = { level = "deny", priority = 1 }
 rust_2018_idioms = { level = "warn", priority = 2 }
@@ -60,5 +21,67 @@ trivial_numeric_casts = { level = "warn", priority = 4 }
 unused_lifetimes = { level = "warn", priority = 5 }
 unused_qualifications = { level = "warn", priority = 6 }
 
-[lints.clippy]
+[workspace.lints.clippy]
 unwrap_used = "deny"
+
+[workspace.dependencies]
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+secrecy = { version = "0.10", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v7", "serde"] }
+zerolease = { path = ".", default-features = false }
+
+[package]
+name = "zerolease"
+authors.workspace = true
+version = "0.1.0"
+edition.workspace = true
+description = "A lightweight, agent-aware credential vault with lease-based access control"
+license.workspace = true
+repository.workspace = true
+keywords = ["credentials", "vault", "security", "agents", "secrets"]
+readme = "README.md"
+categories = ["authentication", "cryptography"]
+
+[dependencies]
+aes-gcm = "0.10"
+async-trait.workspace = true
+aws-config = { version = "1", optional = true }
+aws-sdk-kms = { version = "1", optional = true }
+base64 = "0.22"
+chacha20poly1305 = "0.10"
+chrono.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+uuid.workspace = true
+zeroize = { version = "1.8", features = ["derive"] }
+
+[features]
+default = []
+# Gates integration tests that depend on the in-tree sqlx-based stores
+# (not yet extracted to zerolease-store-sqlx). Unused for now.
+sqlite = []
+vsock = ["tokio-vsock"]
+kms = ["aws-sdk-kms", "aws-config"]
+
+[target.'cfg(unix)'.dependencies]
+keyring = "3.6"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tokio-vsock = { version = "0.7", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+zerolease-store-rusqlite = { path = "crates/zerolease-store-rusqlite" }
+
+[lints]
+workspace = true

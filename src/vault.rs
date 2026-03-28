@@ -575,20 +575,17 @@ where
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "sqlite")]
-    use tempfile::NamedTempFile;
 
-    use super::*;
-    use crate::audit::*;
-    use crate::keysource::env::EnvVarSource;
-    use crate::policy::{AgentPattern, PolicyConfig, PolicyGrant, SecretPattern};
-    use crate::store::SecretKind;
     #[cfg(feature = "sqlite")]
-    use crate::store::sqlite::SqliteStore;
+    use super::*;
+    #[cfg(feature = "sqlite")]
+    use crate::audit::*;
 
     /// A no-op audit log that discards all events. For testing only.
+    #[cfg(feature = "sqlite")]
     struct NoopAuditLog;
 
+    #[cfg(feature = "sqlite")]
     #[async_trait::async_trait]
     impl AuditLog for NoopAuditLog {
         async fn record(&self, _entry: AuditEntry) -> Result<()> {
@@ -622,7 +619,7 @@ mod tests {
         // Create components
         let key_source = EnvVarSource::new(key_var);
         let tmp = NamedTempFile::new().expect("failed to create temp file for test DB");
-        let store = SqliteStore::new(tmp.path())
+        let store = zerolease_store_rusqlite::RusqliteStore::new(tmp.path())
             .await
             .expect("failed to initialize SQLite store");
         let audit = NoopAuditLog;

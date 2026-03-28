@@ -164,7 +164,7 @@ impl KeySourceConfig {
                 encrypted_dek_path,
             } => {
                 let source = kms::KmsSource::new(key_id, region, encrypted_dek_path).await?;
-                Ok(Box::new(source) as Box<dyn KeySource>)
+                Ok(Box::new(source))
             }
 
             #[cfg(not(feature = "kms"))]

@@ -465,7 +465,7 @@ mod tests {
     use crate::policy::{AgentPattern, PolicyConfig, PolicyEngine, PolicyGrant, SecretPattern};
     use crate::protocol::{Request, methods};
     use crate::store::CipherAlgorithm;
-    use crate::store::sqlite::SqliteStore;
+    use zerolease_store_rusqlite::RusqliteStore;
     use crate::transport::PeerIdentity;
     use crate::types::{AgentId, DomainScope, LeaseId, SecretName};
     use crate::vault::Vault;
@@ -499,7 +499,7 @@ mod tests {
     async fn test_vault(
         env_var: &str,
         grants: Vec<PolicyGrant>,
-    ) -> (Arc<Vault<EnvVarSource, SqliteStore, NoopAuditLog>>, NamedTempFile) {
+    ) -> (Arc<Vault<EnvVarSource, RusqliteStore, NoopAuditLog>>, NamedTempFile) {
         // SAFETY: tests run single-threaded via --test-threads=1
         #[allow(unsafe_code)]
         unsafe {
@@ -508,7 +508,7 @@ mod tests {
 
         let key_source = EnvVarSource::new(env_var);
         let tmp = NamedTempFile::new().expect("should create temp file");
-        let store = SqliteStore::new(tmp.path()).await.expect("should create store");
+        let store = RusqliteStore::new(tmp.path()).await.expect("should create store");
         let audit = NoopAuditLog;
 
         let policy = PolicyEngine::new(PolicyConfig {

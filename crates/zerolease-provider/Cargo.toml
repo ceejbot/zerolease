@@ -1,0 +1,22 @@
+[package]
+name = "zerolease-provider"
+version = "0.1.0"
+description = "CredentialProvider trait for lease-based credential access in AI agent tools"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+secrecy.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "rt"] }
+uuid.workspace = true
+zerolease = { workspace = true, default-features = false, optional = true }
+
+[features]
+vault = ["dep:zerolease"]
+
+[lints]
+workspace = true
