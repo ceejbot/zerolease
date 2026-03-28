@@ -5,13 +5,15 @@
 //! vault layer handles encryption/decryption using the DEK from the
 //! key source.
 //!
-//! Two backends are planned:
+//! Backend implementations live in separate crates:
 //!
-//! - **SQLite**: single-file, zero-config, ideal for developer laptops and
-//!   single-host deployments.
-//! - **PostgreSQL**: for shared infrastructure where multiple vault instances
-//!   need a common secret store, or where you want to leverage existing
-//!   database infrastructure, backup tooling, etc.
+//! - **zerolease-store-rusqlite**: single-file, zero-config, ideal for
+//!   developer laptops, single-host deployments, and apps already using
+//!   rusqlite (e.g. zeroclaw).
+//! - **zerolease-store-postgres**: for shared infrastructure where multiple
+//!   vault instances need a common secret store.
+//! - **zerolease-store-aws-sm**: cloud-native storage using AWS Secrets
+//!   Manager with IAM access control and CloudTrail audit logging.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -19,9 +21,9 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 use crate::types::{SecretId, SecretName};
 
-// Storage backend implementations live in separate crates:
-// - zerolease-store-rusqlite (for apps using rusqlite, e.g. zeroclaw)
-// - zerolease-store-sqlx (for standalone deployments) [planned]
+// Storage backend implementations live in separate crates.
+// See zerolease-store-rusqlite, zerolease-store-postgres, and
+// zerolease-store-aws-sm.
 
 /// An encrypted secret as stored in the backend.
 ///
@@ -152,11 +154,13 @@ pub trait SecretStore: Send + Sync + 'static {
         algorithm: CipherAlgorithm,
     ) -> Result<StoredSecret>;
 
-    /// Apply multiple ciphertext updates atomically.
+    /// Apply multiple ciphertext updates in a single operation.
     ///
-    /// Either all updates succeed or none do. Used by DEK rotation
-    /// to re-encrypt all secrets under a new key without risk of
-    /// partial failure leaving mixed encryption states.
+    /// Used by DEK rotation to re-encrypt all secrets under a new key.
+    /// Implementations should provide atomicity where the backend
+    /// supports it (e.g. SQL transactions). Backends without native
+    /// transaction support (e.g. AWS Secrets Manager) should document
+    /// their partial-failure behavior.
     async fn batch_update(&self, updates: Vec<BatchUpdateItem>) -> Result<()>;
 
     /// Delete a secret by name. Also revokes all active leases for

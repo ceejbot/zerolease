@@ -1,0 +1,26 @@
+[package]
+name = "zerolease-store-aws-sm"
+version = "0.1.0"
+description = "AWS Secrets Manager-backed SecretStore for zerolease"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+aws-config = "1"
+aws-sdk-secretsmanager = "1"
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing = "0.1"
+uuid.workspace = true
+zerolease.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

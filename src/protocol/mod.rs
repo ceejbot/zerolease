@@ -257,6 +257,7 @@ pub fn error_to_code(err: &Error) -> &'static str {
         Error::Storage(_) => "storage",
         Error::Transport(_) => "transport",
         Error::InvalidConfig(_) => "invalid_config",
+        Error::NotSupported(_) => "not_supported",
         Error::Remote { .. } => "remote",
     }
 }

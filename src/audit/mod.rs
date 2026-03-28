@@ -29,8 +29,12 @@ use crate::error::Result;
 use crate::transport::PeerIdentity;
 use crate::types::{AgentId, DomainScope, LeaseId, SecretName};
 
-// Audit log implementations live in separate crates alongside their
-// corresponding store backends.
+// Audit log implementations:
+// - TracingAuditLog (below): emit-only, uses the tracing facade
+// - RusqliteAuditLog: in zerolease-store-rusqlite crate
+// - PostgresAuditLog: in zerolease-store-postgres crate
+
+pub mod tracing_log;
 
 /// A single audit log entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]

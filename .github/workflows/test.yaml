@@ -19,6 +19,9 @@ jobs:
     test:
         name: test
         runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            id-token: write
 
         services:
             postgres:
@@ -74,11 +77,19 @@ jobs:
                   DATABASE_URL: postgres://zerolease:zerolease@localhost/zerolease_test
               run: cargo nextest run --manifest-path crates/zerolease-store-postgres/Cargo.toml --run-ignored ignored-only --test-threads=1
 
+            - name: Configure AWS credentials (OIDC)
+              uses: aws-actions/configure-aws-credentials@v4
+              with:
+                  role-to-assume: arn:aws:iam::172924287217:role/zerolease-ci
+                  aws-region: us-west-2
+
+            - name: Run AWS Secrets Manager integration tests
+              env:
+                  ZEROLEASE_SM_TEST_PREFIX: zerolease_test_
+              run: cargo nextest run -p zerolease-store-aws-sm --run-ignored ignored-only --test-threads=1 --no-fail-fast
+
             - name: Run KMS integration tests
               env:
-                  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-                  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-                  AWS_REGION: ${{ secrets.AWS_REGION }}
                   ZEROLEASE_KMS_TEST_KEY_ID: alias/zerolease-test
                   ZEROLEASE_KMS_TEST_REGION: us-west-2
               run: cargo nextest run -p zerolease --features kms -E 'test(keysource::kms)' --run-ignored ignored-only --test-threads=1
