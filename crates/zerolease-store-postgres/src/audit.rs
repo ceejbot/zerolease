@@ -24,7 +24,7 @@ impl PostgresAuditLog {
             .await
             .map_err(|e| Error::Storage(format!("failed to open audit database: {e}")))?;
 
-        sqlx::query(include_str!("../../../sql/postgres_audit_table.sql"))
+        sqlx::raw_sql(include_str!("../../../sql/postgres_audit_table.sql"))
             .execute(&pool)
             .await
             .map_err(|e| Error::Storage(format!("failed to create audit schema: {e}")))?;
