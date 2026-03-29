@@ -3,7 +3,8 @@ _help:
 
 # Run all unit tests using nextest.
 test:
-    cargo nextest run --future-incompat-report
+    cargo nextest run --workspace --all-targets --future-incompat-report
+    cargo nextest run -p zerolease-store-postgres --manifest-path crates/zerolease-store-postgres/Cargo.toml --future-incompat-report
 
 # Run the fuzz tests against the wireline protocol.
 fuzz:
@@ -24,13 +25,15 @@ fmt:
 
 # Run the same checks we run in CI. Requires nightly.
 ci: test fmt
-    cargo clippy --all-targets
+    cargo clippy --workspace --all-targets
+    cargo clippy -p zerolease-store-postgres --manifest-path crates/zerolease-store-postgres/Cargo.toml
     cargo test --doc
+    cargo test --doc -p zerolease-store-postgres --manifest-path crates/zerolease-store-postgres/Cargo.toml
 
 # Install required tools
 setup:
     brew tap ceejbot/tap
-    brew install cargo-nextest tomato semver-bump
+    brew install cargo-nextest tomato semver-bump cargo-llvm-cov
     rustup install nightly
 
 # Tag a new version for release.

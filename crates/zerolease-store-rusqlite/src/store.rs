@@ -249,7 +249,8 @@ impl SecretStore for RusqliteStore {
     }
 }
 
-/// Extract a column value from a rusqlite row, mapping errors to `Error::Storage`.
+/// Extract a column value from a rusqlite row, mapping errors to
+/// `Error::Storage`.
 macro_rules! col {
     ($row:expr, $name:expr, $type:ty) => {
         $row.get::<_, $type>($name).map_err(|e| Error::Storage(e.to_string()))?

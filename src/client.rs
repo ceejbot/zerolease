@@ -40,10 +40,15 @@ impl<C: VaultConnector> VaultClient<C> {
     /// reading the [`ServerHello`] response. Returns an error if the
     /// handshake is rejected or the transport fails.
     pub async fn connect(connector: &C) -> Result<Self> {
+        Self::connect_with_hello(connector, ClientHello::new()).await
+    }
+
+    /// Connect with a pre-built [`ClientHello`] (e.g., one containing
+    /// an auth token for TCP transports).
+    pub async fn connect_with_hello(connector: &C, hello: ClientHello) -> Result<Self> {
         let stream = connector.connect().await?;
         let (mut reader, mut writer) = tokio::io::split(stream);
 
-        let hello = ClientHello::new();
         let hello_bytes =
             serde_json::to_vec(&hello).map_err(|e| Error::Transport(format!("failed to serialize hello: {e}")))?;
         write_frame(&mut writer, &hello_bytes).await?;
@@ -60,6 +65,11 @@ impl<C: VaultConnector> VaultClient<C> {
         }
 
         Ok(Self { reader, writer })
+    }
+
+    /// Connect with an authentication token (convenience for TCP transports).
+    pub async fn connect_with_token(connector: &C, token: &str) -> Result<Self> {
+        Self::connect_with_hello(connector, ClientHello::with_token(token)).await
     }
 
     /// Send a request to the server and return the result value.
@@ -244,6 +254,7 @@ mod tests {
 
     use tempfile::TempDir;
     use tokio::task::JoinHandle;
+    use zerolease_store_rusqlite::RusqliteStore;
 
     use super::*;
     use crate::audit::*;
@@ -252,7 +263,6 @@ mod tests {
     use crate::lease::LeaseTerms;
     use crate::policy::{AgentPattern, PolicyConfig, PolicyEngine, PolicyGrant, SecretPattern};
     use crate::server::VaultServer;
-    use zerolease_store_rusqlite::RusqliteStore;
     use crate::store::{CipherAlgorithm, SecretKind};
     use crate::transport::uds::{UdsConnector, UdsListener};
     use crate::types::{AgentId, DomainScope, LeaseId, SecretName};

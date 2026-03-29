@@ -66,11 +66,7 @@ impl AuditLog for TracingAuditLog {
         ))
     }
 
-    async fn query_by_secret(
-        &self,
-        _secret: &SecretName,
-        _limit: usize,
-    ) -> Result<Vec<AuditEntry>> {
+    async fn query_by_secret(&self, _secret: &SecretName, _limit: usize) -> Result<Vec<AuditEntry>> {
         Err(Error::NotSupported(
             "TracingAuditLog does not support querying; use your log aggregator".into(),
         ))

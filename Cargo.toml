@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/zerolease-provider", "crates/zerolease-store-rusqlite", "crates/zerolease-store-aws-sm"]
+members = [".", "crates/zerolease-provider", "crates/zerolease-store-rusqlite", "crates/zerolease-store-aws-sm", "crates/zerolease-agent"]
 # zerolease-store-postgres excluded from default workspace due to sqlx v0.8
 # libsqlite3-sys conflict with rusqlite. Build/test it separately:
 #   cargo check -p zerolease-store-postgres --manifest-path crates/zerolease-store-postgres/Cargo.toml
@@ -58,6 +58,7 @@ chrono.workspace = true
 secrecy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2 = "0.10"
 thiserror.workspace = true
 tokio.workspace = true
 tracing = "0.1"

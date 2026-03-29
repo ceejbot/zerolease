@@ -12,8 +12,8 @@
 //!   rusqlite (e.g. zeroclaw).
 //! - **zerolease-store-postgres**: for shared infrastructure where multiple
 //!   vault instances need a common secret store.
-//! - **zerolease-store-aws-sm**: cloud-native storage using AWS Secrets
-//!   Manager with IAM access control and CloudTrail audit logging.
+//! - **zerolease-store-aws-sm**: cloud-native storage using AWS Secrets Manager
+//!   with IAM access control and CloudTrail audit logging.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

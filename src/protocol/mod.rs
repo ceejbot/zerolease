@@ -22,10 +22,17 @@ pub const CURRENT_VERSION: u32 = 1;
 // -- Handshake types --
 
 /// Client hello message, sent as the first frame on a new connection.
+///
+/// The `token` field is used by TCP transports for authentication.
+/// UDS and vsock clients omit it (transport-level identity suffices).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientHello {
     pub protocol: String,
     pub version: u32,
+    /// Optional authentication token for transports that lack
+    /// transport-level identity (e.g., TCP). Omitted for UDS/vsock.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
 }
 
 impl Default for ClientHello {
@@ -33,14 +40,23 @@ impl Default for ClientHello {
         Self {
             protocol: PROTOCOL_NAME.to_string(),
             version: CURRENT_VERSION,
+            token: None,
         }
     }
 }
 
 impl ClientHello {
-    /// Create a hello for the current protocol version.
+    /// Create a hello for the current protocol version (no token).
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Create a hello with an authentication token for TCP transports.
+    pub fn with_token(token: impl Into<String>) -> Self {
+        Self {
+            token: Some(token.into()),
+            ..Self::default()
+        }
     }
 }
 

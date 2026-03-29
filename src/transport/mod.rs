@@ -4,25 +4,24 @@
 //! depending on the deployment environment:
 //!
 //! - **Unix domain socket**: developer laptops, local development
+//! - **TCP**: QEMU VMs reaching the host vault via user-mode networking
 //! - **vsock**: Firecracker and QEMU VMs communicating with the host
 //!
-//! Both transports provide a bidirectional byte stream. We abstract over
+//! All transports provide a bidirectional byte stream. We abstract over
 //! them so the vault protocol (request/response framing, serialization)
 //! is transport-agnostic.
-//!
-//! ## vsock note
-//!
-//! vsock (virtio-vsock) works on both QEMU and Firecracker. The guest
-//! connects to the host using a context ID (CID) and port number.
-//! CID 2 is always the host. This means the vault server runs on the
-//! host and agents inside VMs connect to it without any network stack
-//! involvement—no IP addresses, no firewall rules, no exposure to the
-//! network.
+
+use std::net::SocketAddr;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::Result;
 
+/// SHA-256 hash of a token, used for audit logging without exposing
+/// the raw token value.
+pub type TokenHash = [u8; 32];
+
+pub mod tcp;
 pub mod uds;
 #[cfg(feature = "vsock")]
 pub mod vsock;
@@ -49,8 +48,10 @@ pub trait VaultListener: Send + Sync + 'static {
 
 /// Identity of the connecting peer, derived from the transport layer.
 ///
-/// For vsock, this is the guest CID (which maps to a specific VM).
-/// For Unix sockets, this is the peer's UID/PID via SO_PEERCRED.
+/// - Unix sockets: UID/PID via SO_PEERCRED
+/// - vsock: guest CID (maps to a specific VM)
+/// - TCP: peer address + token hash (token presented in ClientHello)
+///
 /// This provides a transport-level identity that can be cross-referenced
 /// with the agent's presented AgentId for defense-in-depth.
 #[derive(Debug, Clone)]
@@ -61,8 +62,22 @@ pub enum PeerIdentity {
     /// vsock peer: the guest's context ID.
     Vsock { cid: u32 },
 
+    /// TCP peer: socket address and SHA-256 hash of the auth token.
+    /// The raw token is never stored here — only its hash for audit.
+    Tcp { addr: SocketAddr, token_hash: TokenHash },
+
     /// Unknown or unauthenticated peer (e.g., during testing).
     Anonymous,
+}
+
+impl PeerIdentity {
+    /// Update the token hash on a TCP peer identity after extracting
+    /// the token from the ClientHello.
+    pub fn set_token_hash(&mut self, hash: TokenHash) {
+        if let PeerIdentity::Tcp { token_hash, .. } = self {
+            *token_hash = hash;
+        }
+    }
 }
 
 impl std::fmt::Display for PeerIdentity {
@@ -70,9 +85,22 @@ impl std::fmt::Display for PeerIdentity {
         match self {
             PeerIdentity::Unix { uid, pid } => write!(f, "unix(uid={uid}, pid={pid})"),
             PeerIdentity::Vsock { cid } => write!(f, "vsock(cid={cid})"),
+            PeerIdentity::Tcp { addr, token_hash } => {
+                // Show first 8 bytes of token hash as hex for audit correlation.
+                let short: String = token_hash[..8].iter().map(|b| format!("{b:02x}")).collect();
+                write!(f, "tcp(addr={addr}, token={short})")
+            }
             PeerIdentity::Anonymous => write!(f, "anonymous"),
         }
     }
+}
+
+/// Compute the SHA-256 hash of a token string for use in [`PeerIdentity::Tcp`].
+pub fn hash_token(token: &str) -> TokenHash {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    hasher.finalize().into()
 }
 
 /// Client-side transport connector. Used by agents to connect to the vault.
