@@ -247,14 +247,9 @@ mod tests {
     }
 
     async fn test_store() -> PostgresStore {
-        let store = PostgresStore::new(&test_url())
+        PostgresStore::new(&test_url())
             .await
-            .expect("should create store");
-        sqlx::query("DELETE FROM secrets")
-            .execute(&store.pool)
-            .await
-            .expect("should clean test data");
-        store
+            .expect("should create store")
     }
 
     fn test_params(name: &str) -> StoreSecretParams {
@@ -268,62 +263,101 @@ mod tests {
         }
     }
 
+    /// Clean up specific secrets by name (each test cleans up after itself).
+    async fn cleanup(store: &PostgresStore, names: &[&str]) {
+        for name in names {
+            let _ = store.delete(&SecretName::new(*name)).await;
+        }
+    }
+
     #[tokio::test]
     #[ignore] // requires running PostgreSQL with zerolease_test database
     async fn put_and_get_round_trip() {
         let store = test_store().await;
-        let stored = store.put(test_params("pg-secret")).await.expect("put");
-        assert_eq!(stored.name, SecretName::new("pg-secret"));
-        assert_eq!(stored.version, 1);
-        let fetched = store.get(&SecretName::new("pg-secret")).await.expect("get");
-        assert_eq!(fetched.ciphertext, stored.ciphertext);
+        cleanup(&store, &["pg-roundtrip"]).await;
+
+        let stored = store.put(test_params("pg-roundtrip")).await.expect("put should store secret");
+        assert_eq!(stored.name, SecretName::new("pg-roundtrip"), "name should match");
+        assert_eq!(stored.version, 1, "initial version should be 1");
+
+        let fetched = store.get(&SecretName::new("pg-roundtrip")).await.expect("get should retrieve secret");
+        assert_eq!(fetched.ciphertext, stored.ciphertext, "ciphertext should match");
+
+        cleanup(&store, &["pg-roundtrip"]).await;
     }
 
     #[tokio::test]
     #[ignore]
     async fn put_duplicate_name_errors() {
         let store = test_store().await;
-        store.put(test_params("pg-dup")).await.expect("first put");
-        let err = store.put(test_params("pg-dup")).await.expect_err("dup").to_string();
-        assert!(err.contains("already exists"), "error was: {err}");
+        cleanup(&store, &["pg-dup"]).await;
+
+        store.put(test_params("pg-dup")).await.expect("first put should succeed");
+        let err = store.put(test_params("pg-dup")).await.expect_err("duplicate put should fail").to_string();
+        assert!(err.contains("already exists"), "expected 'already exists', got: {err}");
+
+        cleanup(&store, &["pg-dup"]).await;
     }
 
     #[tokio::test]
     #[ignore]
     async fn get_missing_errors() {
         let store = test_store().await;
-        let err = store.get(&SecretName::new("pg-nope")).await.expect_err("missing").to_string();
-        assert!(err.contains("not found"), "error was: {err}");
+
+        let err = store
+            .get(&SecretName::new("pg-nonexistent"))
+            .await
+            .expect_err("get for missing secret should fail")
+            .to_string();
+        assert!(err.contains("not found"), "expected 'not found', got: {err}");
     }
 
     #[tokio::test]
     #[ignore]
     async fn update_increments_version() {
         let store = test_store().await;
-        store.put(test_params("pg-versioned")).await.expect("put");
+        cleanup(&store, &["pg-versioned"]).await;
+
+        store.put(test_params("pg-versioned")).await.expect("put should create secret");
         let updated = store
             .update(&SecretName::new("pg-versioned"), vec![10, 20], vec![1; 12], CipherAlgorithm::Aes256Gcm)
             .await
-            .expect("update");
-        assert_eq!(updated.version, 2);
+            .expect("update should succeed");
+        assert_eq!(updated.version, 2, "version should increment to 2");
+
+        cleanup(&store, &["pg-versioned"]).await;
     }
 
     #[tokio::test]
     #[ignore]
     async fn delete_removes_secret() {
         let store = test_store().await;
-        store.put(test_params("pg-doomed")).await.expect("put");
-        store.delete(&SecretName::new("pg-doomed")).await.expect("delete");
-        assert!(store.get(&SecretName::new("pg-doomed")).await.is_err());
+        cleanup(&store, &["pg-doomed"]).await;
+
+        store.put(test_params("pg-doomed")).await.expect("put should create secret");
+        store.delete(&SecretName::new("pg-doomed")).await.expect("delete should succeed");
+
+        let err = store
+            .get(&SecretName::new("pg-doomed"))
+            .await
+            .expect_err("get after delete should fail");
+        assert!(err.to_string().contains("not found"), "expected 'not found' after delete");
     }
 
     #[tokio::test]
     #[ignore]
     async fn list_returns_metadata() {
         let store = test_store().await;
-        store.put(test_params("pg-first")).await.expect("put");
-        store.put(test_params("pg-second")).await.expect("put");
-        let list = store.list().await.expect("list");
-        assert_eq!(list.len(), 2);
+        cleanup(&store, &["pg-list-a", "pg-list-b"]).await;
+
+        store.put(test_params("pg-list-a")).await.expect("put first");
+        store.put(test_params("pg-list-b")).await.expect("put second");
+
+        let list = store.list().await.expect("list should succeed");
+        let names: Vec<String> = list.iter().map(|m| m.name.as_str().to_string()).collect();
+        assert!(names.contains(&"pg-list-a".to_string()), "list should contain pg-list-a, got: {names:?}");
+        assert!(names.contains(&"pg-list-b".to_string()), "list should contain pg-list-b, got: {names:?}");
+
+        cleanup(&store, &["pg-list-a", "pg-list-b"]).await;
     }
 }

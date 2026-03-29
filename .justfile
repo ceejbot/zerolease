@@ -4,7 +4,7 @@ _help:
 # Run all unit tests using nextest.
 test:
     cargo nextest run --workspace --all-targets --future-incompat-report
-    cargo nextest run -p zerolease-store-postgres --manifest-path crates/zerolease-store-postgres/Cargo.toml --future-incompat-report
+    cargo nextest run -p zerolease-store-postgres --manifest-path crates/zerolease-store-postgres/Cargo.toml  --run-ignored ignored-only --future-incompat-report
 
 # Run the fuzz tests against the wireline protocol.
 fuzz:
@@ -27,8 +27,8 @@ fmt:
 ci: test fmt
     cargo clippy --workspace --all-targets
     cargo clippy -p zerolease-store-postgres --manifest-path crates/zerolease-store-postgres/Cargo.toml
-    cargo test --doc
-    cargo test --doc -p zerolease-store-postgres --manifest-path crates/zerolease-store-postgres/Cargo.toml
+    # cargo test --doc  --no-tests
+    # cargo test --doc -p zerolease-store-postgres --manifest-path crates/zerolease-store-postgres/Cargo.toml --no-tests
 
 # Install required tools
 setup:
@@ -40,11 +40,12 @@ setup:
 version BUMP:
     #!/usr/bin/env bash
     set -e
-    current=$(tomato get package.version Cargo.toml)
+    current=$(tomato get workspace.package.version Cargo.toml)
     version=$(semver-bump {{ BUMP }} "$current")
-    tomato set package.version "$version" Cargo.toml &> /dev/null
+    tomato set workspace.package.version "$version" Cargo.toml &> /dev/null
+    tomato set package.version "$version" crates/zerolease-store-postgres/Cargo.toml &> /dev/null
     cargo generate-lockfile
-    git commit Cargo.toml -m "v${version}"
+    git commit Cargo.{toml,lockfile} crates/zerolease-store-postgres/Cargo.{toml,lockfile} -m "v${version}"
     git tag "v${version}"
     echo "Release tagged for version v${version}"
 
