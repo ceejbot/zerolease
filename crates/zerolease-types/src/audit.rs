@@ -15,4 +15,6 @@ pub enum RevocationReason {
     UseLimitReached,
     /// The vault is shutting down and revoking all leases.
     VaultShutdown,
+    /// The parent session was revoked or expired.
+    SessionRevoked,
 }

@@ -1,10 +1,15 @@
 //! SQLite-backed audit log using `rusqlite`.
+//!
+//! Supports hash-chained entries for offline tamper detection. Each entry
+//! includes a SHA-256 hash of the previous entry, forming a chain that
+//! can be verified with `verify_audit_chain()`.
 
 use std::path::Path;
 use std::sync::Arc;
 
 use chrono::Utc;
 use rusqlite::Connection;
+use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use zerolease::audit::{AuditEntry, AuditEvent, AuditLog, AuditOutcome};
@@ -31,6 +36,9 @@ impl RusqliteAuditLog {
             conn.execute_batch(include_str!("../../../sql/sqlite_audit_table.sql"))
                 .map_err(|e| Error::Storage(format!("failed to create audit_events table: {e}")))?;
 
+            // Migrate v1 schema: add hash chain columns if missing
+            migrate_add_hash_columns(&conn)?;
+
             for idx in [
                 "CREATE INDEX IF NOT EXISTS idx_audit_agent ON audit_events(agent)",
                 "CREATE INDEX IF NOT EXISTS idx_audit_secret ON audit_events(secret_name)",
@@ -49,6 +57,142 @@ impl RusqliteAuditLog {
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
+    }
+}
+
+/// Well-known genesis hash for the first entry in the chain.
+const GENESIS_HASH: &str = "sha256:zerolease-audit-genesis";
+
+/// Compute the SHA-256 hash of genesis to seed the chain.
+fn genesis_hash() -> String {
+    let hash = Sha256::digest(GENESIS_HASH.as_bytes());
+    hex::encode(hash)
+}
+
+/// Compute the entry hash for an audit entry.
+fn compute_entry_hash(
+    prev_hash: &str,
+    event_id: &str,
+    timestamp: &str,
+    event_json: &str,
+    agent: &str,
+    outcome_json: &str,
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(prev_hash.as_bytes());
+    hasher.update(event_id.as_bytes());
+    hasher.update(timestamp.as_bytes());
+    hasher.update(event_json.as_bytes());
+    hasher.update(agent.as_bytes());
+    hasher.update(outcome_json.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+/// Migrate v1 schema to v2 by adding hash chain columns.
+fn migrate_add_hash_columns(conn: &Connection) -> Result<()> {
+    // Check if prev_hash column already exists
+    let has_prev_hash: bool = conn
+        .prepare("SELECT COUNT(*) FROM pragma_table_info('audit_events') WHERE name = 'prev_hash'")
+        .and_then(|mut stmt| stmt.query_row([], |row| row.get::<_, i64>(0)))
+        .map(|count| count > 0)
+        .unwrap_or(false);
+
+    if !has_prev_hash {
+        conn.execute_batch(
+            "ALTER TABLE audit_events ADD COLUMN prev_hash TEXT;
+             ALTER TABLE audit_events ADD COLUMN entry_hash TEXT;",
+        )
+        .map_err(|e| Error::Storage(format!("failed to add hash chain columns: {e}")))?;
+    }
+    Ok(())
+}
+
+/// Result of verifying the audit hash chain.
+#[derive(Debug)]
+pub struct AuditChainVerification {
+    /// Total entries examined.
+    pub total_entries: u64,
+    /// Entries whose hash matched the computed value.
+    pub verified_entries: u64,
+    /// Event ID of the first entry where the chain broke, if any.
+    pub first_broken_at: Option<String>,
+    /// Whether the entire chain is valid.
+    pub is_valid: bool,
+}
+
+impl RusqliteAuditLog {
+    /// Verify the integrity of the audit hash chain.
+    ///
+    /// Walks all entries in timestamp order, recomputes each hash, and
+    /// compares to the stored value. Returns a summary of the verification.
+    ///
+    /// This detects offline tampering (editing the SQLite file) but NOT
+    /// in-process fabrication (a compromised process can sign fake entries).
+    pub async fn verify_audit_chain(&self) -> Result<AuditChainVerification> {
+        let conn = Arc::clone(&self.conn);
+
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.blocking_lock();
+            let mut stmt = conn
+                .prepare(
+                    "SELECT event_id, timestamp, event, agent, outcome, prev_hash, entry_hash
+                     FROM audit_events ORDER BY timestamp ASC",
+                )
+                .map_err(|e| Error::Storage(format!("prepare failed: {e}")))?;
+
+            let mut rows = stmt
+                .query([])
+                .map_err(|e| Error::Storage(format!("query failed: {e}")))?;
+
+            let mut total = 0u64;
+            let mut verified = 0u64;
+            let mut first_broken_at: Option<String> = None;
+            let mut expected_prev_hash = genesis_hash();
+
+            while let Some(row) = rows.next().map_err(|e| Error::Storage(format!("row next failed: {e}")))? {
+                total += 1;
+
+                let event_id: String = row.get("event_id").map_err(|e| Error::Storage(e.to_string()))?;
+                let timestamp: String = row.get("timestamp").map_err(|e| Error::Storage(e.to_string()))?;
+                let event_json: String = row.get("event").map_err(|e| Error::Storage(e.to_string()))?;
+                let agent: String = row.get("agent").map_err(|e| Error::Storage(e.to_string()))?;
+                let outcome_json: String = row.get("outcome").map_err(|e| Error::Storage(e.to_string()))?;
+                let stored_prev: Option<String> = row.get("prev_hash").map_err(|e| Error::Storage(e.to_string()))?;
+                let stored_hash: Option<String> = row.get("entry_hash").map_err(|e| Error::Storage(e.to_string()))?;
+
+                // Entries without hashes (pre-migration) are skipped
+                let (Some(stored_prev), Some(stored_hash)) = (stored_prev, stored_hash) else {
+                    expected_prev_hash = genesis_hash(); // reset chain after gap
+                    continue;
+                };
+
+                if stored_prev != expected_prev_hash {
+                    if first_broken_at.is_none() {
+                        first_broken_at = Some(event_id.clone());
+                    }
+                } else {
+                    let computed =
+                        compute_entry_hash(&stored_prev, &event_id, &timestamp, &event_json, &agent, &outcome_json);
+                    if computed == stored_hash {
+                        verified += 1;
+                    } else if first_broken_at.is_none() {
+                        first_broken_at = Some(event_id.clone());
+                    }
+                }
+
+                expected_prev_hash = stored_hash;
+            }
+
+            let is_valid = first_broken_at.is_none() && total > 0;
+            Ok(AuditChainVerification {
+                total_entries: total,
+                verified_entries: verified,
+                first_broken_at,
+                is_valid,
+            })
+        })
+        .await
+        .map_err(|e| Error::Storage(format!("spawn_blocking failed: {e}")))?
     }
 }
 
@@ -118,10 +262,29 @@ impl AuditLog for RusqliteAuditLog {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn.blocking_lock();
+
+            // Fetch the previous entry's hash for the chain
+            let prev_hash: String = conn
+                .query_row(
+                    "SELECT entry_hash FROM audit_events WHERE entry_hash IS NOT NULL ORDER BY timestamp DESC LIMIT 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or_else(|_| genesis_hash());
+
+            let entry_hash = compute_entry_hash(
+                &prev_hash,
+                &event_id_str,
+                &timestamp_str,
+                &event_str,
+                &agent_str,
+                &outcome_str,
+            );
+
             conn.execute(
-                "INSERT INTO audit_events (event_id, timestamp, event, agent, peer_identity, outcome, secret_name, lease_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                rusqlite::params![event_id_str, timestamp_str, event_str, agent_str, peer, outcome_str, secret_name, lease_id],
+                "INSERT INTO audit_events (event_id, timestamp, event, agent, peer_identity, outcome, secret_name, lease_id, prev_hash, entry_hash)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                rusqlite::params![event_id_str, timestamp_str, event_str, agent_str, peer, outcome_str, secret_name, lease_id, prev_hash, entry_hash],
             )
             .map_err(|e| Error::Storage(format!("failed to insert audit event: {e}")))?;
             Ok(())

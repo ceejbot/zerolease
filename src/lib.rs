@@ -88,12 +88,14 @@ pub mod lease;
 pub mod policy;
 pub mod protocol;
 pub mod server;
+pub mod session;
 pub mod store;
 pub mod transport;
 pub mod types {
     pub use zerolease_types::audit::RevocationReason;
     pub use zerolease_types::identity::*;
     pub use zerolease_types::lease::{LeaseGrant, LeaseTerms};
+    pub use zerolease_types::session::{SessionId, SessionToken};
     pub use zerolease_types::store::{CipherAlgorithm, SecretKind, SecretMetadata};
 }
 pub mod vault;

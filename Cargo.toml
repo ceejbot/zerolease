@@ -84,6 +84,7 @@ keyring = "3.6"
 tokio-vsock = { version = "0.7", optional = true }
 
 [dev-dependencies]
+rusqlite = { version = "0.39", features = ["bundled"] }
 tempfile = "3"
 zerolease-store-rusqlite = { path = "crates/zerolease-store-rusqlite" }
 

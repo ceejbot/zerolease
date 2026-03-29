@@ -275,6 +275,11 @@ pub fn error_to_code(err: &Error) -> &'static str {
         Error::InvalidConfig(_) => "invalid_config",
         Error::NotSupported(_) => "not_supported",
         Error::Remote { .. } => "remote",
+        Error::SessionNotFound => "session_not_found",
+        Error::SessionExpired(_) => "session_expired",
+        Error::SessionRevoked(_) => "session_revoked",
+        Error::SessionLeaseLimitReached(_, _) => "session_lease_limit",
+        Error::RenewalLimitReached(_, _) => "renewal_limit_reached",
     }
 }
 
@@ -298,7 +303,7 @@ mod tests {
 
     use super::*;
     use crate::error::Error;
-    use crate::types::{AgentId, DomainScope, LeaseId, SecretName};
+    use crate::types::{AgentId, DomainScope, LeaseId, SecretName, SessionId};
 
     #[test]
     fn client_hello_serde_round_trip() {
@@ -445,12 +450,19 @@ mod tests {
                 code: "x".into(),
                 message: "x".into(),
             },
+            Error::SessionNotFound,
+            Error::SessionExpired(SessionId::new()),
+            Error::SessionRevoked(SessionId::new()),
+            Error::SessionLeaseLimitReached(SessionId::new(), 5),
+            Error::RenewalLimitReached(LeaseId::new(), 3),
         ];
 
         let expected_codes = [
             "lease_expired", "lease_revoked", "lease_not_found", "access_denied", "no_policy_for_agent",
             "secret_not_found", "secret_already_exists", "encryption_failed", "decryption_failed",
             "key_source_unavailable", "storage", "transport", "invalid_config", "remote",
+            "session_not_found", "session_expired", "session_revoked", "session_lease_limit",
+            "renewal_limit_reached",
         ];
 
         for (err, expected) in test_cases.iter().zip(expected_codes.iter()) {

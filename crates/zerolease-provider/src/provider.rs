@@ -6,7 +6,7 @@
 //! handle to a secret. This replaces the static `String` credential
 //! fields that tools typically store for their entire process lifetime.
 
-use zerolease_types::{AgentId, DomainScope, SecretName};
+use zerolease_types::{AgentId, DomainScope, SecretName, SessionToken};
 
 use crate::credential::CredentialGuard;
 use crate::error::ProviderError;
@@ -21,6 +21,13 @@ pub struct CredentialRequest {
     pub target_domain: DomainScope,
     /// Identity of the requesting agent.
     pub agent_id: AgentId,
+    /// Session token for session-scoped access. When present, the vault
+    /// validates that the session is active and the tool-to-secret binding
+    /// allows this access. When absent, existing behavior is unchanged.
+    pub session_token: Option<SessionToken>,
+    /// Name of the invoking tool (e.g., "jira", "github"). Required when
+    /// `session_token` is present for tool-to-secret binding enforcement.
+    pub tool_name: Option<String>,
 }
 
 /// A provider that acquires credentials from a vault on behalf of tools.

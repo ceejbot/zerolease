@@ -4,7 +4,7 @@
 //! for ergonomic `?` propagation, and we're careful never to include
 //! secret material in error messages or Debug output.
 
-use crate::types::{AgentId, DomainScope, LeaseId, SecretName};
+use crate::types::{AgentId, DomainScope, LeaseId, SecretName, SessionId};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -28,6 +28,22 @@ pub enum Error {
 
     #[error("no policy found for agent {0}")]
     NoPolicyForAgent(AgentId),
+
+    // -- Session errors --
+    #[error("session not found")]
+    SessionNotFound,
+
+    #[error("session {0} has expired")]
+    SessionExpired(SessionId),
+
+    #[error("session {0} has been revoked")]
+    SessionRevoked(SessionId),
+
+    #[error("session {0} has reached the maximum of {1} concurrent leases")]
+    SessionLeaseLimitReached(SessionId, u32),
+
+    #[error("lease {0} has reached the maximum of {1} renewals for this session")]
+    RenewalLimitReached(LeaseId, u32),
 
     // -- Secret errors --
     #[error("secret {0} not found")]

@@ -18,7 +18,7 @@ use secrecy::{ExposeSecret, SecretString};
 pub use zerolease_types::lease::{LeaseGrant, LeaseTerms};
 
 use crate::error::{Error, Result};
-use crate::types::{AgentId, DomainScope, LeaseId, SecretName};
+use crate::types::{AgentId, DomainScope, LeaseId, SecretName, SessionId};
 
 /// A live lease granting an agent access to a specific credential.
 ///
@@ -36,6 +36,13 @@ pub struct Lease {
     pub max_uses: Option<u32>,
     pub use_count: u32,
     pub revoked: bool,
+    /// Parent session, if this lease was created within a session scope.
+    /// Used for cascade revocation and renewal cap enforcement.
+    pub session_id: Option<SessionId>,
+    /// Number of times this lease has been renewed. Tracked for
+    /// `max_renewals_per_lease` enforcement when the lease belongs
+    /// to a session.
+    pub renewal_count: u32,
 }
 
 impl Lease {
@@ -53,6 +60,8 @@ impl Lease {
             max_uses: terms.max_uses,
             use_count: 0,
             revoked: false,
+            session_id: None,
+            renewal_count: 0,
         }
     }
 
@@ -105,6 +114,7 @@ impl Lease {
             return Err(Error::InvalidConfig(format!("lease {} is not renewable", self.id)));
         }
         self.expires_at = Utc::now() + extension;
+        self.renewal_count += 1;
         Ok(())
     }
 

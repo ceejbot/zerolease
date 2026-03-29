@@ -33,9 +33,10 @@ use crate::error::{Error, Result};
 use crate::keysource::{DataEncryptionKey, KeySource};
 use crate::lease::{Lease, LeaseGrant, LeaseGuard};
 use crate::policy::PolicyEngine;
+use crate::session::{Session, SessionPolicy};
 use crate::store::{CipherAlgorithm, SecretKind, SecretMetadata, SecretStore, StoreSecretParams};
 use crate::transport::PeerIdentity;
-use crate::types::{AgentId, DomainScope, LeaseId, SecretName};
+use crate::types::{AgentId, DomainScope, LeaseId, SecretName, SessionId, SessionToken};
 
 /// The vault server. Owns all subsystems and coordinates operations.
 ///
@@ -60,6 +61,7 @@ where
     audit: A,
     policy: RwLock<PolicyEngine>,
     leases: RwLock<HashMap<LeaseId, Lease>>,
+    sessions: RwLock<HashMap<SessionToken, Session>>,
     dek: RwLock<Option<DataEncryptionKey>>,
     cipher: Cipher,
     /// Maximum active leases allowed per agent. Prevents memory
@@ -85,6 +87,7 @@ where
             audit,
             policy: RwLock::new(policy),
             leases: RwLock::new(HashMap::new()),
+            sessions: RwLock::new(HashMap::new()),
             dek: RwLock::new(None),
             cipher: Cipher::new(default_algorithm),
             max_leases_per_agent: Self::DEFAULT_MAX_LEASES_PER_AGENT,
@@ -346,6 +349,9 @@ where
     }
 
     /// Renew an active lease, extending its expiration.
+    ///
+    /// If the lease belongs to a session, the session's
+    /// `max_renewals_per_lease` is enforced.
     pub async fn renew_lease(
         &self,
         lease_id: &LeaseId,
@@ -365,6 +371,19 @@ where
                 return Err(Error::InvalidConfig(format!(
                     "extension must be between 1 and {MAX_EXTENSION_SECS} seconds, got {extension_secs}"
                 )));
+            }
+
+            // Enforce max_renewals_per_lease when lease belongs to a session
+            if let Some(session_id) = lease.session_id {
+                let sessions = self.sessions.read().await;
+                if let Some(session) = sessions.values().find(|s| s.id == session_id)
+                    && lease.renewal_count >= session.policy.max_renewals_per_lease
+                {
+                    return Err(Error::RenewalLimitReached(
+                        *lease_id,
+                        session.policy.max_renewals_per_lease,
+                    ));
+                }
             }
 
             lease.renew(chrono::TimeDelta::seconds(extension_secs))?;
@@ -507,6 +526,220 @@ where
         let removed = before - leases.len();
         if removed > 0 {
             tracing::debug!(removed, remaining = leases.len(), "lease GC complete");
+        }
+        removed
+    }
+
+    // -- Session management --
+
+    /// Create a new session. Returns the opaque token and session ID.
+    ///
+    /// The token is a random 128-bit handle stored in a `HashMap`.
+    /// The caller threads it through tool execution context so that
+    /// `request_lease_scoped` can validate session scope.
+    pub async fn create_session(
+        &self,
+        user: &str,
+        channel: &str,
+        policy: SessionPolicy,
+        peer: &PeerIdentity,
+    ) -> Result<(SessionToken, SessionId)> {
+        let session = Session::new(user, channel, policy);
+        let session_id = session.id;
+        let duration_secs = session.time_remaining().num_seconds();
+
+        // Generate random token
+        let mut bytes = [0u8; 16];
+        aes_gcm::aead::rand_core::RngCore::fill_bytes(&mut aes_gcm::aead::OsRng, &mut bytes);
+        let token = SessionToken::from_bytes(bytes);
+
+        self.sessions.write().await.insert(token.clone(), session);
+
+        self.trace_and_record(AuditEntry::new(
+            AuditEvent::SessionCreated {
+                session_id,
+                user: user.to_owned(),
+                channel: channel.to_owned(),
+                duration_secs,
+            },
+            AgentId::new(user),
+            peer,
+            AuditOutcome::Success,
+        ))
+        .await?;
+
+        tracing::info!(
+            session_id = %session_id,
+            user = user,
+            channel = channel,
+            "session created"
+        );
+
+        Ok((token, session_id))
+    }
+
+    /// Validate a session token. Returns a clone of the session if active.
+    pub async fn validate_session(&self, token: &SessionToken) -> Result<Session> {
+        let sessions = self.sessions.read().await;
+        let session = sessions.get(token).ok_or(Error::SessionNotFound)?;
+
+        if session.revoked {
+            return Err(Error::SessionRevoked(session.id));
+        }
+        if session.is_expired() {
+            return Err(Error::SessionExpired(session.id));
+        }
+
+        Ok(session.clone())
+    }
+
+    /// Revoke a session and all its child leases.
+    pub async fn revoke_session(&self, token: &SessionToken, peer: &PeerIdentity) -> Result<()> {
+        // 1. Mark session revoked and capture its ID
+        let session_id = {
+            let mut sessions = self.sessions.write().await;
+            let session = sessions.get_mut(token).ok_or(Error::SessionNotFound)?;
+            session.revoke();
+            session.id
+        };
+
+        // 2. Revoke all child leases
+        let mut leases_revoked = 0u32;
+        {
+            let mut leases = self.leases.write().await;
+            for lease in leases.values_mut() {
+                if lease.session_id == Some(session_id) && !lease.revoked {
+                    lease.revoke();
+                    leases_revoked += 1;
+
+                    self.trace_and_record_best_effort(AuditEntry::new(
+                        AuditEvent::LeaseRevoked {
+                            lease_id: lease.id,
+                            reason: RevocationReason::SessionRevoked,
+                        },
+                        lease.agent.clone(),
+                        peer,
+                        AuditOutcome::Success,
+                    ))
+                    .await;
+                }
+            }
+        }
+
+        // 3. Audit session revocation
+        self.trace_and_record(AuditEntry::new(
+            AuditEvent::SessionRevoked {
+                session_id,
+                reason: "explicit revocation".into(),
+                leases_revoked,
+            },
+            AgentId::new("session"),
+            peer,
+            AuditOutcome::Success,
+        ))
+        .await?;
+
+        tracing::info!(
+            session_id = %session_id,
+            leases_revoked = leases_revoked,
+            "session revoked"
+        );
+
+        Ok(())
+    }
+
+    /// Request a lease scoped to a session.
+    ///
+    /// Validates the session, checks tool-to-secret bindings, enforces
+    /// concurrent lease limits, then delegates to the standard lease
+    /// creation logic. The resulting lease is linked to the session.
+    pub async fn request_lease_scoped(
+        &self,
+        agent: &AgentId,
+        secret_name: &SecretName,
+        domain: &DomainScope,
+        peer: &PeerIdentity,
+        session_token: &SessionToken,
+        tool_name: &str,
+    ) -> Result<LeaseGrant> {
+        // 1. Validate session
+        let session_id = {
+            let sessions = self.sessions.read().await;
+            let session = sessions.get(session_token).ok_or(Error::SessionNotFound)?;
+
+            if session.revoked {
+                return Err(Error::SessionRevoked(session.id));
+            }
+            if session.is_expired() {
+                return Err(Error::SessionExpired(session.id));
+            }
+
+            // 2. Check tool-to-secret binding
+            if let Err(_e) = session.check_tool_binding(tool_name, secret_name, domain) {
+                self.trace_and_record_best_effort(AuditEntry::new(
+                    AuditEvent::ToolBindingDenied {
+                        session_id: session.id,
+                        tool_name: tool_name.to_owned(),
+                        secret_name: secret_name.clone(),
+                        reason: format!(
+                            "tool '{}' is not bound to secret '{}' for domain '{}'",
+                            tool_name, secret_name, domain
+                        ),
+                    },
+                    agent.clone(),
+                    peer,
+                    AuditOutcome::Denied {
+                        reason: "tool-to-secret binding denied".into(),
+                    },
+                ))
+                .await;
+                return Err(Error::AccessDenied {
+                    agent: AgentId::new(tool_name),
+                    secret: secret_name.clone(),
+                    domain: domain.clone(),
+                });
+            }
+
+            // 3. Check concurrent lease limit
+            if session.active_lease_count >= session.policy.max_concurrent_leases {
+                return Err(Error::SessionLeaseLimitReached(
+                    session.id,
+                    session.policy.max_concurrent_leases,
+                ));
+            }
+
+            session.id
+        };
+
+        // 4. Use existing request_lease logic for policy check + lease creation
+        let grant = self.request_lease(agent, secret_name, domain, peer).await?;
+
+        // 5. Link lease to session and increment active count
+        {
+            let mut leases = self.leases.write().await;
+            if let Some(lease) = leases.get_mut(&grant.lease_id) {
+                lease.session_id = Some(session_id);
+            }
+        }
+        {
+            let mut sessions = self.sessions.write().await;
+            if let Some(session) = sessions.get_mut(session_token) {
+                session.active_lease_count += 1;
+            }
+        }
+
+        Ok(grant)
+    }
+
+    /// Garbage-collect expired sessions from memory.
+    /// Call this periodically alongside `gc_leases`.
+    pub async fn gc_sessions(&self) -> usize {
+        let mut sessions = self.sessions.write().await;
+        let before = sessions.len();
+        sessions.retain(|_, session| session.is_active());
+        let removed = before - sessions.len();
+        if removed > 0 {
+            tracing::debug!(removed, remaining = sessions.len(), "session GC complete");
         }
         removed
     }

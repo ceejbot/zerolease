@@ -28,7 +28,7 @@ pub use zerolease_types::audit::RevocationReason;
 
 use crate::error::Result;
 use crate::transport::PeerIdentity;
-use crate::types::{AgentId, DomainScope, LeaseId, SecretName};
+use crate::types::{AgentId, DomainScope, LeaseId, SecretName, SessionId};
 
 // Audit log implementations:
 // - TracingAuditLog (below): emit-only, uses the tracing facade
@@ -121,6 +121,29 @@ pub enum AuditEvent {
 
     /// Policy was reloaded.
     PolicyReloaded { grant_count: usize },
+
+    /// A session was created.
+    SessionCreated {
+        session_id: SessionId,
+        user: String,
+        channel: String,
+        duration_secs: i64,
+    },
+
+    /// A session was revoked (explicitly or by expiration).
+    SessionRevoked {
+        session_id: SessionId,
+        reason: String,
+        leases_revoked: u32,
+    },
+
+    /// A tool-to-secret binding check was denied.
+    ToolBindingDenied {
+        session_id: SessionId,
+        tool_name: String,
+        secret_name: SecretName,
+        reason: String,
+    },
 }
 
 impl AuditEvent {
@@ -144,6 +167,8 @@ impl AuditEvent {
             Self::SecretRotated { secret_name, .. } => (Some(secret_name.as_str()), None),
             Self::SecretDeleted { secret_name } => (Some(secret_name.as_str()), None),
             Self::DekRotated | Self::PolicyReloaded { .. } => (None, None),
+            Self::SessionCreated { .. } | Self::SessionRevoked { .. } => (None, None),
+            Self::ToolBindingDenied { secret_name, .. } => (Some(secret_name.as_str()), None),
         }
     }
 }

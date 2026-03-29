@@ -1,5 +1,5 @@
 -- zerolease audit log table (SQLite)
--- Schema version: 1
+-- Schema version: 2 (added hash chain columns)
 
 CREATE TABLE IF NOT EXISTS audit_events (
     event_id      TEXT PRIMARY KEY,
@@ -9,5 +9,7 @@ CREATE TABLE IF NOT EXISTS audit_events (
     peer_identity TEXT NOT NULL,
     outcome       TEXT NOT NULL,
     secret_name   TEXT,
-    lease_id      TEXT
+    lease_id      TEXT,
+    prev_hash     TEXT,
+    entry_hash    TEXT
 );
