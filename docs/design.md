@@ -6,10 +6,36 @@ zerolease is a credential vault for environments where AI coding agents need acc
 
 - **[Credential Sidecar — Embedded Deployment](design-credential-sidecar-embedded.md)**:
   Design for session-scoped credential access in the embedded (single-binary)
-  deployment model. Covers the process supervisor, fd-based credential delivery,
-  and tool-to-secret binding. This document extends the trust model below with
-  session-scoped tokens initiated by trusted user messages.
-- A companion cloud/VM sidecar design doc is planned.
+  deployment model. Built-in tools use the `acquire()`/`expose()` closure
+  pattern — credentials never escape closure scope. Sessions, tool-to-secret
+  bindings, and audit provide defense-in-depth against bugs and prompt injection.
+- **[Implementation Plan — Embedded](plans/embedded-credential-sidecar.md)**:
+  Two-phase plan: session infrastructure in zerolease, then zeroclaw integration.
+- A companion cloud/VM sidecar design doc is planned. It will cover the
+  process supervisor, credential shim, fd-based delivery, and MCP server
+  lifecycle management — all VM-mode concerns for securing external plugins
+  inside QEMU guests.
+
+## Two Deployment Models
+
+zerolease supports two deployment models with fundamentally different trust
+properties. This design document describes the shared core and the VM model.
+The embedded model has its own design doc (linked above).
+
+| | Embedded | VM (Cloud) |
+|---|---|---|
+| **Vault location** | In-process (`Arc<Vault>`) | Separate host behind network boundary |
+| **Orchestrator trust** | Same address space as vault | Untrusted (requests credentials over TCP) |
+| **Tool execution** | Built-in Rust (`expose()` closure) | External processes (Claude Code + plugins) |
+| **Credential delivery** | Closure argument, zeroized on drop | Fd shim / env var, process group isolation |
+| **Security model** | Secure by construction (type system) | Secure by enforcement (process + network) |
+| **Session tokens** | Random opaque handle, `HashMap` lookup | HMAC-signed, stateless validation over network |
+| **Primary threat** | Our own bugs, prompt injection | Malicious/compromised tools, credential exfiltration |
+
+The shared core — `Vault<K, S, A>`, leases, policy engine, audit log,
+crypto, transports, types — serves both models. The enforcement layer
+diverges: embedded mode needs no subprocess machinery; VM mode needs the
+proxy, provisioner, supervisor, and iptables rules described below.
 
 ## The Problem
 
@@ -39,16 +65,19 @@ zerolease replaces this with lease-based access: agents receive time-bounded, do
 - A compromised VM image. If the base image is tampered with, all bets are off.
 - Denial of service by a tool that exhausts the proxy's resources. The proxy is hardened against common DoS vectors but is not a production-grade DDoS target.
 
-**Trust boundaries:**
+**Trust boundaries (VM model):**
 
 | Component | Trust level |
 |-----------|------------|
 | The vault (host) | Fully trusted. Holds credentials, enforces policy. |
-| The orchestrator (Claw) | Fully trusted in VM model. In the embedded model, session scoping provides defense-in-depth (see [sidecar design](design-credential-sidecar-embedded.md)). |
+| The orchestrator (Claw) | Fully trusted. Manages VM lifecycle, issues tokens. |
 | The proxy (VM) | Trusted infrastructure. Runs as a separate user, enforces leases at the network layer. |
 | The provisioner (VM) | Trusted infrastructure. Runs once, handles the vault token, exits. |
 | Claude Code (VM) | Untrusted. Receives credentials via env vars and config files. |
 | Tools invoked by Claude Code (VM) | Untrusted. May attempt to exfiltrate credentials. |
+
+For embedded-mode trust boundaries, see the
+[embedded design doc](design-credential-sidecar-embedded.md#trust-boundaries-embedded).
 
 ## Core Abstractions
 
@@ -75,6 +104,24 @@ A lease is a time-bounded, domain-scoped handle to a credential. When an agent n
 
 Leases expire automatically. They can be revoked at any time by the vault administrator or the orchestrator.
 
+### Sessions
+
+Sessions are a first-class vault concept that bind credential access to a
+trust context — typically a user-initiated conversation or work unit.
+
+A session has a token (opaque handle), a user identity, a policy (which
+credentials may be requested, via tool-to-secret bindings), and lifetime
+bounds (`max_session_duration`, `max_concurrent_leases`,
+`max_renewals_per_lease`). Leases issued under a session are revoked when
+the session ends.
+
+Session implementation differs by deployment model:
+- **Embedded:** Random 128-bit token, `HashMap` lookup in-process. The
+  token never leaves the process. See the
+  [embedded design doc](design-credential-sidecar-embedded.md).
+- **VM:** Token format TBD (likely HMAC-signed for stateless validation
+  across the network boundary). Defined in the VM design doc (planned).
+
 ### Transports
 
 The vault speaks a JSON-over-length-prefixed-frames protocol. Three transports:
@@ -85,7 +132,7 @@ The vault speaks a JSON-over-length-prefixed-frames protocol. Three transports:
 
 The transport provides a `PeerIdentity` (what the OS/network tells us about the peer). The `Authenticator` trait maps this to a `ConnectionIdentity` (role + agent binding). The vault dispatch logic enforces role-based access control.
 
-### The Proxy
+### The Proxy (VM Model)
 
 In VM deployments, credentials are injected into the environment where any process can read them. Lease revocation is meaningless if the tool already has the raw token. The lease-aware proxy closes this gap:
 
@@ -107,11 +154,18 @@ When the orchestrator revokes the prompt-run token, the proxy starts blocking. T
 
 **Storage and audit are decoupled.** A `SecretStore` crate doesn't need to also provide an `AuditLog`. The AWS Secrets Manager backend provides only `SecretStore`; you pair it with `TracingAuditLog` for audit. This lets you choose the right tool for each job.
 
-**The proxy doesn't terminate TLS.** It only needs the destination domain, which it gets from the HTTP CONNECT request line (explicit proxy) or TLS SNI (transparent proxy). It never sees credential material inside the encrypted tunnel. No custom CA cert, no per-API auth knowledge.
+**The proxy doesn't terminate TLS** (VM model). It only needs the destination domain, which it gets from the HTTP CONNECT request line (explicit proxy) or TLS SNI (transparent proxy). It never sees credential material inside the encrypted tunnel. No custom CA cert, no per-API auth knowledge.
 
-**The vault token dies with the provisioner.** In VM deployments, the prompt-run token is used by the provisioner and never written to the agent's environment. The provisioner exits, taking the token with it. If `credential-fill` (git credential helper) needs vault access, it gets a separate, more restricted token.
+**The vault token dies with the provisioner** (VM model). The prompt-run token is used by the provisioner and never written to the agent's environment. The provisioner exits, taking the token with it. If `credential-fill` (git credential helper) needs vault access, it gets a separate, more restricted token.
 
-**Default-deny outbound networking.** In VM deployments, `iptables -P OUTPUT DROP` is applied at boot before any process starts. Only the proxy user can reach port 443. All other outbound traffic (UDP, ICMP, SSH, HTTP) is blocked. The VM is a network jail with one exit.
+**Default-deny outbound networking** (VM model). `iptables -P OUTPUT DROP` is applied at boot before any process start. Only the proxy user can reach port 443. All other outbound traffic (UDP, ICMP, SSH, HTTP) is blocked. The VM is a network jail with one exit.
+
+**Embedded mode needs none of the above VM machinery.** All tools are
+built-in Rust code using `acquire()`/`expose()`. Credentials never enter
+environment variables, file descriptors, or child processes. There is no
+proxy, no iptables, no provisioner. Session scoping and tool-to-secret
+bindings provide the enforcement layer. See the
+[embedded design doc](design-credential-sidecar-embedded.md).
 
 ## Encryption
 

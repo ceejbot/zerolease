@@ -15,8 +15,8 @@ You have a persistent infrastructure (not disposable VMs) where multiple process
 │  zerolease vault server                 │
 │  ├── KeySource: KmsSource (AWS KMS)     │
 │  ├── SecretStore: PostgresStore         │
-│  ├── AuditLog: TracingAuditLog → ELK   │
-│  └── Authenticator: (your impl)        │
+│  ├── AuditLog: TracingAuditLog → Loki   │
+│  └── Authenticator: (your impl)         │
 │       │                                 │
 │       ├── UDS  → local orchestrator     │
 │       └── TCP  → CI runners, services   │
@@ -29,11 +29,11 @@ You have a persistent infrastructure (not disposable VMs) where multiple process
 
 ## Choosing Backends
 
-| Backend | Crate | Why |
-|---------|-------|-----|
-| **KeySource** | `KmsSource` (feature `kms`) | DEK encrypted by AWS KMS. No key material on disk. |
-| **SecretStore** | `zerolease-store-postgres` | Shared PostgreSQL. Backups, replication, familiar ops. |
-| **AuditLog** | `TracingAuditLog` (core crate) | Structured events → stdout → fluentd/vector → your log aggregator. |
+| Backend         | Crate                          | Why                                                           |
+| --------------- | ------------------------------ | ------------------------------------------------------------- |
+| **KeySource**   | `KmsSource` (feature `kms`)    | DEK encrypted by AWS KMS. No key material on disk.            |
+| **SecretStore** | `zerolease-store-postgres`     | Shared PostgreSQL. Backups, replication, familiar ops.        |
+| **AuditLog**    | `TracingAuditLog` (core crate) | Structured events → stdout → fluentd/vector → log aggregator. |
 
 For smaller deployments, `RusqliteStore + RusqliteAuditLog` on a single host works fine.
 
@@ -119,6 +119,7 @@ impl Authenticator for MyAuthenticator {
 ```
 
 Three roles are available:
+
 - **Admin**: Can store, delete, list secrets, and perform all lease operations.
 - **Agent**: Bound to a single agent identity. Can only request/access/revoke leases. The agent field in requests is ignored — the server substitutes the bound identity.
 - **Orchestrator**: Trusted to assert any agent identity per request. For systems acting on behalf of multiple agents.
@@ -129,33 +130,34 @@ Policies can be loaded from a JSON file with `PolicyConfig::from_file()`:
 
 ```json
 {
-  "default_lease_terms": {
-    "ttl": [900, 0],
-    "renewable": false,
-    "max_uses": null
-  },
-  "grants": [
-    {
-      "agent": { "Exact": "tool-git" },
-      "secret": { "Exact": "github-pat" },
-      "allowed_domains": ["github.com"],
-      "lease_terms": {
-        "ttl": [900, 0],
-        "renewable": false,
-        "max_uses": 10
-      }
-    },
-    {
-      "agent": { "Prefix": "ci-" },
-      "secret": "Any",
-      "allowed_domains": ["*.internal.example.com"],
-      "lease_terms": null
-    }
-  ]
+	"default_lease_terms": {
+		"ttl": [900, 0],
+		"renewable": false,
+		"max_uses": null
+	},
+	"grants": [
+		{
+			"agent": { "Exact": "tool-git" },
+			"secret": { "Exact": "github-pat" },
+			"allowed_domains": ["github.com"],
+			"lease_terms": {
+				"ttl": [900, 0],
+				"renewable": false,
+				"max_uses": 10
+			}
+		},
+		{
+			"agent": { "Prefix": "ci-" },
+			"secret": "Any",
+			"allowed_domains": ["*.internal.example.com"],
+			"lease_terms": null
+		}
+	]
 }
 ```
 
 Agent and secret patterns support three forms:
+
 - `{ "Exact": "name" }` — matches exactly one agent/secret
 - `{ "Prefix": "ci-" }` — matches any name starting with the prefix
 - `"Any"` — matches everything (use with caution)

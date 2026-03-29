@@ -1,6 +1,6 @@
 # Design: Credential Sidecar — Embedded Deployment
 
-**Status:** Draft — revised after internal security audit, awaiting human review
+**Status:** Draft — revised after security review (2026-03-29)
 
 **Date:** 2026-03-29
 
@@ -23,7 +23,7 @@ through CLI tools and MCP servers. Today, credentials are:
   process or rotate the upstream token.
 
 The `CredentialProvider` trait migration (zeroclaw commit `e0259516`) solved the
-*interface* problem: tools now call `acquire()` per-request and use `expose()`
+_interface_ problem: tools now call `acquire()` per-request and use `expose()`
 with zeroize-on-drop semantics. But the backing implementation is still
 `StaticProvider` — a `HashMap` seeded from config at startup. The credentials
 are still plaintext, unbounded, and irrevocable.
@@ -36,17 +36,20 @@ embedded (single-binary) deployment model.
 **In scope:**
 
 - Session-scoped credential access initiated by trusted user messages
-- Credential-injecting process supervisor for CLI tools and MCP servers
 - In-process `Arc<Vault>` behind a crate feature gate (`embedded-vault`)
+- Session-aware `CredentialProvider` for zeroclaw's built-in tools
 - Audit logging of all credential operations
 - Lease-based lifecycle with automatic revocation
+- Tool-to-secret binding enforcement in policy
 
 **Out of scope:**
 
 - Cloud/VM deployment (separate design doc)
+- Process supervisor, credential shim, fd-based delivery (VM-mode concerns;
+  see "Why No Process Supervisor" below)
+- MCP server launching and lifecycle management (VM-mode concern)
 - Credential rotation or sync with upstream services (zerolease is not a
   secrets manager)
-- Modifying third-party MCP servers or CLI tools
 - OAuth-based tools (MS365Tool, LinkedInTool already have per-request
   resolution)
 
@@ -82,28 +85,26 @@ separate host behind a network boundary.
 ### Session-Scoped Tokens
 
 With that caveat established, sessions remain the fundamental unit of
-authorization for the *intended* code paths.
+authorization for the _intended_ code paths.
 
 ```
 Trusted User ──message──▶ Orchestrator ──creates──▶ Session
                                                        │
-                                                       ├──token──▶ Provisioner
+                                                       ├──token──▶ Supervisor
                                                        │               │
                                                        │          vault.acquire()
                                                        │               │
                                                        │          scoped credentials
-                                                       │
-                                                       └──(future)──▶ Collaborators
 ```
 
 **Trust chain:**
 
 1. A **trusted user** sends an incoming message (Telegram, API, CLI prompt).
 2. The orchestrator authenticates the user and creates a **session**.
-3. The session produces a **session token** — a capability that authorizes
-   credential requests scoped to this session's lifetime and purpose.
-4. The provisioner (process supervisor) presents the session token when
-   requesting credentials from the vault.
+3. The session produces a **session token** — a random opaque handle that
+   maps to session state via `HashMap` lookup within the vault.
+4. The supervisor presents the session token when requesting credentials
+   from the vault.
 5. The vault grants credentials **scoped to the session**: bounded TTL,
    domain restrictions, use-count limits.
 6. When the session ends (user disconnects, conversation completes, timeout),
@@ -115,18 +116,18 @@ Trusted User ──message──▶ Orchestrator ──creates──▶ Session
   specific user message. No standing privileges.
 - **Session = blast radius.** In normal operation (no code-level compromise),
   credential access is limited to the scope of active sessions.
-- **Extensible to collaboration.** A session token represents a trust context
-  that could be shared when other humans join the work — the session is "this
-  work context," not "this user's conversation."
+- **Single-user model.** Embedded mode serves one user at a time. There is
+  no multi-user session isolation within a single process. Multi-user
+  credential isolation requires the VM deployment model.
 
 ### Trust Boundaries (Embedded)
 
-| Component | Trust level | Enforcement |
-|-----------|------------|-------------|
-| The vault (in-process) | Fully trusted. Holds credentials, enforces policy. | N/A — the vault is the root of trust. |
-| The orchestrator (zeroclaw) | **Effectively fully trusted** — shares address space with vault. Session scoping is defense-in-depth, not an enforced boundary. | Self-imposed: code discipline, session API. |
-| CLI tools / MCP servers | Untrusted. Receive credentials via fd/env. Cannot outlive their supervisor. | Enforced: process isolation, process group kill, credential delivery mechanism. |
-| The device (Pi / laptop) | Trusted platform. Physical access = game over. | Out of scope: full-disk encryption, physical security. |
+| Component                   | Trust level                                                                                                                     | Enforcement                                                                     |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| The vault (in-process)      | Fully trusted. Holds credentials, enforces policy.                                                                              | N/A — the vault is the root of trust.                                           |
+| The orchestrator (zeroclaw) | **Effectively fully trusted** — shares address space with vault. Session scoping is defense-in-depth, not an enforced boundary. | Self-imposed: code discipline, session API.                                     |
+| CLI tools / MCP servers     | **First-party only.** Receive credentials via fd/env. Cannot outlive their supervisor. No external plugins.                      | Enforced: process isolation, process group kill, credential delivery mechanism. |
+| The device (Pi / laptop)    | Trusted platform. Physical access = game over.                                                                                  | Out of scope: full-disk encryption, physical security.                          |
 
 **Relation to `docs/design.md`:** The original zerolease design doc marks
 the orchestrator as "fully trusted." The embedded model is consistent with
@@ -139,13 +140,11 @@ boundary. The cloud/VM model achieves actual trust separation.
 
 ### Component Ownership
 
-| Component | Crate | Why |
-|-----------|-------|-----|
-| Process supervisor (`provision-run`) | `zerolease` | Natural extension of `zerolease-agent provision`. Manages child process lifecycle, env injection, lease revocation. |
-| `ZeroleaseProvider` (trait impl) | `zerolease-provider` | Already exists. Implements `CredentialProvider` against a vault connection. |
-| Session management | `zerolease` | Sessions are a vault-level concept — the vault issues and validates session tokens. |
-| Tool registry wiring | `zeroclaw` | Connects `build_credential_provider()` to the vault. Feature-gated on `embedded-vault`. |
-| MCP config integration | `zeroclaw` | Reads MCP server definitions, passes them to the process supervisor. |
+| Component                        | Crate                | Why                                                                                                    |
+| -------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------ |
+| Session management               | `zerolease`          | Sessions are a vault-level concept — the vault issues and validates session tokens.                    |
+| Session-aware credential provider| `zerolease-provider` | Wraps vault access behind `CredentialProvider` trait. Carries session token for scoped lease requests. |
+| Tool registry wiring             | `zeroclaw`           | Connects `build_credential_provider()` to the vault. Feature-gated on `embedded-vault`.                |
 
 ### Feature Gate: `embedded-vault`
 
@@ -159,8 +158,8 @@ embedded-vault = ["zerolease/vault", "zerolease/sqlite-store", "zerolease/keycha
 
 - Zeroclaw constructs `Arc<Vault<KeychainSource, RusqliteStore, RusqliteAuditLog>>`
   at startup.
-- `build_credential_provider()` returns a `ZeroleaseProvider` backed by this
-  in-process vault.
+- `build_credential_provider()` returns a session-aware `ZeroleaseProvider`
+  backed by this in-process vault.
 - Single binary, no external services required. Suitable for Raspberry Pi,
   laptop, air-gapped environments.
 
@@ -172,147 +171,88 @@ embedded-vault = ["zerolease/vault", "zerolease/sqlite-store", "zerolease/keycha
   (details in the cloud design doc).
 - No vault code, no crypto dependencies compiled in.
 
-### Process Supervisor
+### Credential Flow: Built-in Tools
 
-The process supervisor is the core mechanism. It handles both CLI tools and
-MCP servers identically — the "swap-out game" pattern.
-
-#### CLI Tool Flow
-
-```
-Session token ──▶ Supervisor
-                      │
-                 vault.request_lease("jira-pat", session_token)
-                      │
-                 lease granted (TTL=60s, domains=["*.atlassian.net"])
-                      │
-                 spawn child (in new process group):
-                   fd 3 ← credential via pipe
-                   exec: cred-shim → reads fd 3 → sets env → exec tool
-                      │
-                 child exits
-                      │
-                 killpg(child_pgid) — kill entire process group
-                      │
-                 vault.revoke_lease(lease_id)
-                      │
-                 audit: LeaseRevoked { tool: "gh", duration: 2.3s }
-```
-
-1. Tool execution request arrives (from agent conversation).
-2. Supervisor presents session token, requests lease for required credentials.
-3. Vault checks policy, grants lease with TTL and domain scope.
-4. Supervisor spawns child process **in a new process group** (`setpgid(0, 0)`)
-   with credentials delivered via the fd delivery mechanism (see below).
-5. Child runs to completion (or is killed on lease expiry).
-6. Supervisor kills **the entire process group** (`killpg`) — not just the
-   direct child. This prevents grandchild processes from inheriting credentials
-   and surviving revocation.
-7. Supervisor revokes lease immediately after process group termination.
-8. Audit event emitted with tool name, duration, and outcome.
-
-#### Credential Delivery
-
-**Default: fd-based delivery.** The supervisor creates an anonymous pipe (or
-`memfd_create` on Linux), writes the credential, and passes the read end as
-a file descriptor to the child process. A thin **credential shim** reads the
-fd, sets the appropriate environment variable, closes the fd, then `exec`s
-the actual tool binary.
-
-This eliminates credential exposure through `/proc/<pid>/environ` (Linux)
-and `proc_pidinfo` / `sysctl kern.procargs2` (macOS), which allow any
-same-UID process to read another process's environment variables.
+In embedded mode, zeroclaw's tools are built-in Rust implementations
+(`impl Tool`) that call `CredentialProvider::acquire()` directly. There
+are no child processes, no fd delivery, no credential shim. The credential
+exists only within an `expose()` closure and is zeroized when the guard
+drops.
 
 ```
-Supervisor
-    │
-    ├── pipe() → (read_fd, write_fd)
-    ├── write(write_fd, credential)
-    ├── close(write_fd)
-    │
-    └── spawn cred-shim:
-            fd 3 = read_fd
-            argv = ["cred-shim", "--env=JIRA_API_TOKEN", "--fd=3", "--", "jira-cli", "issue", "list"]
-            │
-            cred-shim:
-              1. read(fd 3) → credential
-              2. close(fd 3)
-              3. setenv("JIRA_API_TOKEN", credential)
-              4. exec("jira-cli", ["issue", "list"])
+Trusted User ──message──▶ Zeroclaw
+                               │
+                          create_session(user, policy)
+                               │
+                          session token stored in HashMap
+                               │
+                          LLM decides: call jira tool
+                               │
+                          JiraTool::execute()
+                               │
+                          credential_provider.acquire(CredentialRequest {
+                              secret_name: "jira-pat",
+                              target_domain: "*.atlassian.net",
+                              agent_id: "tool-jira",
+                              session_token,               // NEW: scoped to session
+                          })
+                               │
+                          vault validates:
+                            ✓ session is active
+                            ✓ tool-to-secret binding allows jira → jira-pat
+                            ✓ domain scope matches
+                            ✓ max_concurrent_leases not exceeded
+                               │
+                          lease granted (TTL=60s)
+                               │
+                          guard.expose(|token| {
+                              // token is &str, lives only in this closure
+                              http_client.basic_auth(&email, Some(token))
+                                  .send()
+                          })
+                               │
+                          guard dropped → credential zeroized
+                          lease revoked (or expires via TTL)
+                          audit: SecretAccessed { tool: "jira", domain: "*.atlassian.net", duration: 0.3s }
 ```
 
-**Compatibility fallback: env var injection.** Some tools may not work with
-the shim (e.g., tools that inspect their own process tree or argv). For
-these, env var injection is available as an **explicit opt-in** per tool
-definition, with a warning emitted in the audit log:
+**Why this is secure by construction:**
 
-```toml
-[[tool_credential_binding]]
-tool = "legacy-cli"
-secrets = ["legacy-key"]
-delivery = "env"  # default is "fd"
-# audit log will warn: "credential delivered via env var — /proc exposure risk"
-```
+1. The credential never exists as a named binding. It's a closure argument
+   (`&str`) that cannot be stored, cloned, or passed elsewhere.
+2. The `CredentialGuard` is not `Clone`, not `Serialize`, and redacts in
+   `Debug`. You cannot accidentally persist it.
+3. The lease is revoked when the guard drops — automatic, deterministic.
+4. The session token scopes what the tool can request. A prompt injection
+   that tricks the LLM into calling the Jira tool with a GitHub credential
+   request is rejected by the policy engine's tool-to-secret binding.
+5. No child processes means no fork escape, no fd inheritance, no env var
+   leakage, no process group management.
 
-#### MCP Server Flow
+### Why No Process Supervisor in Embedded Mode
 
-```
-Session token ──▶ Supervisor
-                      │
-                 vault.request_lease("github-pat", session_token)
-                      │
-                 lease granted (TTL=300s, domains=["api.github.com"])
-                      │
-                 spawn child (in new process group):
-                   fd 3 ← credential via pipe
-                   exec: cred-shim → sets env → exec MCP server
-                      │
-                 MCP server handles batch of tool calls
-                      │
-                 batch complete OR lease approaching expiry
-                      │
-                 SIGTERM → graceful shutdown (5s) → killpg(SIGKILL)
-                      │
-                 vault.revoke_lease(lease_id)
-```
+The process supervisor (credential shim, fd delivery, process group
+isolation) exists to bring *external* processes closer to the security
+properties that built-in tools already have natively. In embedded mode,
+all tools are built-in Rust code — the `expose()` closure pattern provides
+strictly stronger guarantees than any subprocess-based delivery mechanism:
 
-MCP servers differ from CLI tools in one way: they are long-lived (relative
-to a single tool call) but short-lived (relative to the session). The
-supervisor:
+| Property                    | Built-in (`expose()`)           | Subprocess (fd/env) |
+| --------------------------- | ------------------------------- | ------------------- |
+| Credential lifetime         | Microseconds (closure scope)    | Entire process life |
+| Credential location         | Stack frame only                | Env var or fd       |
+| Code you control            | 100% (your Rust)                | 0% (opaque binary)  |
+| Fork escape risk            | N/A                             | Yes (env var path)  |
+| Process isolation needed    | No                              | Yes                 |
+| Audit granularity           | Per-API-call                    | Per-lease (coarse)  |
 
-1. Launches the MCP server in a **new process group** with credentials
-   delivered via fd (same mechanism as CLI tools).
-2. Proxies MCP protocol messages (stdio transport) between zeroclaw and
-   the server.
-3. Monitors lease TTL. On approaching expiry, either renews (subject to
-   `max_renewals_per_lease`) or initiates graceful shutdown.
-4. On batch completion (see definition below), tears down the server.
-5. Kills the entire process group, then revokes the lease.
+The supervisor, shim, and fd plumbing are **VM-mode concerns** — needed
+when zeroclaw orchestrates QEMU VMs running Claude Code with external
+plugins. That infrastructure will be designed in the VM deployment doc.
 
-**MCP servers are NOT always-running.** They are started on-demand when
-the agent needs a tool from that server, and torn down when the batch of
-related tool calls completes. This is critical: an always-running MCP server
-with injected credentials defeats the lease model.
-
-#### Batch Definition
-
-A **batch** ends when ALL of the following are true:
-
-1. The orchestrator signals that it has no more pending tool calls for this
-   MCP server.
-2. An **idle timeout** (default: 10 seconds, configurable per-tool) has
-   elapsed with no new tool calls arriving.
-3. The lease has not expired.
-
-If the lease expires before the batch completes, the supervisor initiates
-graceful shutdown regardless. The idle timeout acts as a safety net — even
-if the orchestrator fails to signal batch completion (e.g., due to a bug or
-prompt injection manipulating the conversation flow), the server is torn down
-after a bounded idle period.
-
-The orchestrator's signal provides responsiveness (immediate teardown when
-the agent is done with a tool). The idle timeout provides safety (bounded
-credential lifetime regardless of orchestrator behavior).
+**Embedded mode does not support MCP servers.** If a capability is needed,
+implement it as a built-in `impl Tool` with `acquire()`/`expose()`. This
+inherits every security property for free.
 
 ### Session Lifecycle
 
@@ -321,21 +261,21 @@ credential lifetime regardless of orchestrator behavior).
 │                    SESSION                           │
 │                                                      │
 │  Created: trusted user sends message                 │
-│  Token:   opaque, non-forgeable, bound to session ID │
+│  Token:   random opaque handle, HashMap lookup       │
 │  Scope:   which credentials may be requested         │
 │  TTL:     max session duration (configurable)        │
 │                                                      │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐              │
-│  │ Lease 1 │  │ Lease 2 │  │ Lease 3 │   ...        │
-│  │ gh CLI  │  │ Jira MCP│  │ Notion  │              │
-│  │ 60s TTL │  │ 300s TTL│  │ 60s TTL │              │
-│  └─────────┘  └─────────┘  └─────────┘              │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐               │
+│  │ Lease 1 │  │ Lease 2 │  │ Lease 3 │   ...         │
+│  │ jira    │  │ github  │  │ notion  │               │
+│  │ 60s TTL │  │ 60s TTL │  │ 60s TTL │               │
+│  └─────────┘  └─────────┘  └─────────┘               │
 │                                                      │
 │  Ends: user disconnects / conversation done /        │
 │        timeout / explicit revocation                 │
 │                                                      │
-│  On end: all child leases revoked, all child         │
-│          processes terminated, audit summary emitted  │
+│  On end: all child leases revoked,                   │
+│          audit summary emitted                       │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -351,54 +291,45 @@ max_session_duration = "1h"    # absolute hard cap, non-renewable
 max_concurrent_leases = 5
 max_renewals_per_lease = 3     # prevents infinite renewal
 
-# Tool-to-secret bindings: each tool can only access its bound secrets.
-# The supervisor enforces this — a tool invocation for "jira-cli" can only
-# request "jira-pat", never "github-pat", even within the same session.
+# Tool-to-secret bindings: each built-in tool can only access its bound
+# secrets. The vault's policy engine enforces this at acquire() time.
 
 [[tool_credential_binding]]
-tool = "jira-cli"
+tool = "jira"
 secrets = ["jira-pat"]
 domains = ["*.atlassian.net"]
-env_var = "JIRA_API_TOKEN"
 
 [[tool_credential_binding]]
-tool = "gh"
+tool = "github"
 secrets = ["github-pat"]
 domains = ["api.github.com", "github.com"]
-env_var = "GITHUB_TOKEN"
 
 [[tool_credential_binding]]
-tool = "npx @modelcontextprotocol/server-github"
-secrets = ["github-pat"]
-domains = ["api.github.com"]
-env_var = "GITHUB_PERSONAL_ACCESS_TOKEN"
-
-[[tool_credential_binding]]
-tool = "notion-cli"
+tool = "notion"
 secrets = ["notion-key"]
 domains = ["api.notion.com"]
-env_var = "NOTION_API_KEY"
 ```
 
-Tool-to-secret bindings prevent a confused-deputy attack: even if the
-orchestrator (or a prompt injection) requests the wrong credential for a
-tool, the policy engine rejects it. The supervisor MUST enforce that a tool
-invocation can only request credentials that are bound to that tool in the
-policy configuration.
+Tool-to-secret bindings prevent a confused-deputy attack: even if a prompt
+injection tricks the LLM into calling a tool with the wrong credential
+request, the policy engine rejects it at `acquire()` time. No env vars
+or delivery methods are needed — built-in tools receive credentials via
+the `expose()` closure, never as materialized values.
 
 ## Security Considerations
 
 ### What Embedded Mode Provides
 
-Embedded mode provides **lifecycle management, auditability, and
-defense-in-depth** against accidental misuse and bugs. Specifically:
+Embedded mode provides **secure-by-construction credential handling,
+auditability, and defense-in-depth** against bugs and prompt injection.
 
-- **Credential lifecycle.** Leases expire; credentials delivered via fd are
-  closed after exec; process groups are killed on revocation. No credential
-  survives beyond its intended use in normal operation.
+- **Credential never materialized.** The `expose()` closure pattern means
+  credentials exist only as closure arguments (`&str`) on the stack. They
+  cannot be stored, logged, serialized, or passed to another function.
+  This is strictly stronger than any subprocess-based delivery.
 - **Lateral movement prevention.** Tool-to-secret bindings ensure a tool
   invoked for Jira cannot request the GitHub token, even within the same
-  session.
+  session. Enforced at `acquire()` time by the vault's policy engine.
 - **Bounded access windows.** `max_session_duration` + `max_renewals_per_lease`
   \+ lease TTL = hard upper bound on credential accessibility.
 - **Full audit trail.** Every lease acquisition, access, and revocation
@@ -408,6 +339,9 @@ defense-in-depth** against accidental misuse and bugs. Specifically:
   It cannot create new sessions (requires trusted user authentication),
   access credentials outside the session policy, or request credentials not
   bound to the tool being invoked.
+- **No subprocess attack surface.** No child processes, no fd inheritance,
+  no env var leakage, no process group escape, no fork bombs. All tool
+  code runs in-process under the orchestrator's control.
 
 ### What Embedded Mode Does NOT Provide
 
@@ -415,91 +349,108 @@ defense-in-depth** against accidental misuse and bugs. Specifically:
   share an address space. Arbitrary code execution in the orchestrator =
   full vault access. This requires the VM deployment model.
 - **Network-layer enforcement.** No proxy, no iptables, no egress filtering.
-  A malicious tool can exfiltrate credentials through any network path during
-  the lease window.
+  A bug in a built-in tool could send a credential to the wrong endpoint
+  during the lease window.
 - **Protection against malicious use of allowed APIs.** A tool with a valid
   Jira lease can create/delete/modify Jira issues. Domain-scoping prevents
-  *which* service, not *what actions*.
-- **Supply chain protection.** The supervisor executes whatever binary is
-  configured. A compromised npm package or typosquatted CLI tool gets
-  credentials and network access. See mitigations below.
-- **LLM context credential leakage prevention.** Tool output containing
-  credential material (error messages, debug logs) may be fed back into
-  the LLM context and subsequently exposed through conversation history.
+  _which_ service, not _what actions_.
+- **Protection against bugs in built-in tools.** A coding error in a
+  built-in tool could leak credential material (e.g., including it in
+  a log message or error response fed back to the LLM). The `expose()`
+  closure makes this harder but not impossible.
 
 ### Concrete Attack Scenarios
 
 These scenarios are documented for threat modeling. Each has a corresponding
 mitigation (implemented or planned).
 
-**Scenario 1: Prompt injection credential harvesting.**
-A Jira issue body contains prompt injection text. The agent reads the issue
-using its Jira credential. The injected prompt causes the agent to invoke a
-shell tool that reads credentials from its environment and includes them in
-tool output. The credential is now in the LLM context. The injected prompt
-instructs the agent to exfiltrate via an HTTP call to an allowed domain.
+**Scenario 1: Prompt injection — confused deputy.**
+A Jira issue body contains prompt injection text. The injected prompt
+tricks the LLM into calling the HTTP request tool with the Jira credential
+to post data to an attacker-controlled endpoint.
 
-*Mitigations:* Tool-to-secret binding (shell tool has no credential bindings).
-Credential output redaction (scan tool output for known credential patterns
-before feeding to LLM context — imperfect but raises the bar). Short lease
-TTLs limit the window.
+_Mitigations:_ Tool-to-secret binding — the HTTP request tool has no
+credential bindings (or its own, separate bindings). The vault rejects
+the `acquire()` call because "jira-pat" is not bound to "http_request".
+The LLM cannot override policy.
 
-**Scenario 2: Malicious MCP server / CLI tool (supply chain).**
-An attacker publishes a typosquatted package. The MCP server reads env vars,
-posts credentials to an allowed domain as a GitHub Gist, then behaves
-normally.
+**Scenario 2: Prompt injection — credential in tool output.**
+A prompt injection causes the LLM to call a tool in a way that includes
+credential material in the tool's return value (e.g., "print the auth
+header you just used"). The credential enters the LLM context and may be
+exfiltrated in a subsequent tool call to an allowed domain.
 
-*Mitigations:* Executable allowlisting — the supervisor should only execute
-binaries from a configured allowlist. Fd-based credential delivery (the
-credential is on a pipe fd, not in env vars, so simple `env` commands don't
-expose it — though a determined attacker can still `read(3, ...)`).
-Audit log flags unrecognized executables.
+_Mitigations:_ The `expose()` closure pattern makes this harder — the
+credential is a closure argument, not a variable the tool can easily
+include in its output. However, a built-in tool could be written with a
+bug that captures and returns the credential. Short lease TTLs limit the
+window. Code review of built-in tools is the primary defense.
 
-**Scenario 3: Child process fork escape.**
-A child process forks before being killed. The grandchild inherits all file
-descriptors and env vars. SIGTERM kills the parent but not the grandchild.
+**Scenario 3: Bug in built-in tool leaks credential.**
+A coding error in a built-in tool stores the credential in a struct
+field, logs it, or includes it in an error message. The credential
+persists beyond the `expose()` closure's intended scope.
 
-*Mitigation:* Process group isolation (`setpgid` + `killpg`). On Linux,
-consider a dedicated cgroup per tool invocation to prevent fork escape
-entirely. The credential shim closes the fd before exec, so the grandchild
-does not inherit the pipe — but env vars set by the shim persist in forked
-children.
+_Mitigations:_ The `CredentialGuard` is not `Clone` and not `Serialize`.
+The credential is `&str` (borrowed), so storing it requires an explicit
+`.to_string()` — a code smell detectable in review. Lease TTL bounds
+the credential's validity. Audit log records every access. This is
+fundamentally a code quality issue — the type system raises the bar but
+cannot prevent a determined (or careless) developer from copying the
+value.
 
-**Scenario 4: Session token theft via core dump.**
-The orchestrator crashes; a core dump containing the session token in
-cleartext is written to disk. Another process reads the dump and extracts
-the token.
-
-*Mitigation:* `prctl(PR_SET_DUMPABLE, 0)` (Linux) at startup when
-`embedded-vault` is active. Disable crash reporting on macOS. Store session
-tokens in `mlock`'d memory pages. Zeroize on session end.
-
-**Scenario 5: Lease renewal as infinite access.**
+**Scenario 4: Lease renewal as infinite access.**
 A long conversation keeps renewing leases, providing continuous credential
 access despite short TTLs.
 
-*Mitigation:* `max_renewals_per_lease` (default: 3) and
-`max_session_duration` (absolute hard cap). Renewal requires re-presenting
-the session token. Optional: re-authentication for sessions exceeding a
-configurable threshold (e.g., after 30 minutes, require user confirmation
-via the originating channel).
+_Mitigation:_ `max_renewals_per_lease` (default: 3) and
+`max_session_duration` (absolute hard cap). These are enforced by the
+vault, not the tool code — a bug in a tool cannot extend its own lease
+beyond the policy limits.
+
+**Scenario 5: Session outlives user intent.**
+The user walks away from a conversation. The session remains active
+(no explicit disconnect), and a prompt injection from earlier-loaded
+content continues to issue tool calls using the session's credentials.
+
+_Mitigation:_ `max_session_duration` provides an absolute hard cap.
+The session expires regardless of activity. For the embedded model
+(single user, trusted device), this is sufficient. The VM model adds
+network-layer enforcement for stronger guarantees.
 
 ### Mitigations Summary
 
-| Mitigation | Status | Priority |
-|-----------|--------|----------|
-| Fd-based credential delivery (default) | Designed | P0 |
-| Process group isolation (`setpgid` + `killpg`) | Designed | P0 |
-| Tool-to-secret binding in policy | Designed | P1 |
-| Hard-cap session/lease lifetimes | Designed | P1 |
-| Fail closed on vault init failure | Designed | P1 |
-| Audit log integrity (HMAC-signed entries) | Planned | P1 |
-| Session token format (HMAC-SHA256, mlock'd, zeroized) | Planned | P2 |
-| Executable allowlisting | Planned | P2 |
-| Credential output redaction | Planned | P2 |
-| Core dump prevention | Planned | P3 |
-| Policy file integrity checking | Planned | P3 |
-| Child process sandboxing (seccomp/sandbox-exec) | Future | P3 |
+| Mitigation                                     | Status   | Priority |
+| ---------------------------------------------- | -------- | -------- |
+| `expose()` closure credential delivery         | Existing | P0       |
+| Tool-to-secret binding in policy               | Designed | P0       |
+| Hard-cap session/lease lifetimes               | Designed | P0       |
+| Fail closed on vault init failure              | Designed | P0       |
+| Audit log integrity (hash-chained entries)     | Planned  | P2       |
+
+**Not applicable to embedded mode** (all are VM-mode concerns):
+
+- **Fd-based credential delivery / credential shim.** Built-in tools use
+  `expose()` closure — strictly stronger than any subprocess delivery.
+- **Process group isolation.** No child processes in embedded mode.
+- **Executable allowlisting.** No external binaries executed.
+- **Core dump prevention (`prctl`).** Marginal; the DEK in a core dump
+  is the real risk, and an attacker with core dump access has broader
+  filesystem access. Consider for VM mode.
+
+**Removed after security review (2026-03-29):**
+
+- **HMAC-SHA256 session tokens / `mlock` / HKDF key derivation.** In
+  embedded mode, the session token never leaves the process. A random
+  token with `HashMap` lookup provides identical security. HMAC tokens
+  are appropriate for the VM model where tokens cross a network boundary.
+- **Rate limiting on session creation.** The only session creator is the
+  orchestrator, gated on authenticated user messages. No threat model.
+- **Credential output redaction.** Pattern-based scanning provides false
+  confidence. Deferred — build only if real-world tool output reveals need.
+- **Policy file integrity signing.** Incoherent without signing the binary,
+  SQLite database, and keychain entry. Physical filesystem access is game
+  over in embedded mode.
 
 ### Fail-Closed Behavior
 
@@ -522,146 +473,125 @@ Without `fallback = "static"`, vault initialization failure is fatal.
 
 ### Session Token Specification
 
-The session token is an HMAC-SHA256 over:
+In the embedded model, the session token is a **random opaque handle**:
 
-```
-HMAC-SHA256(vault_session_key, session_id || created_at || expires_at || nonce)
-```
-
-- `vault_session_key`: derived from the vault's DEK, used only for session
-  token signing. Compromising this key requires vault-level access.
-- `nonce`: random 128-bit value, unique per session.
-- The token is stored in `mlock`'d memory and zeroized when the session ends.
+- 128-bit random value generated via `OsRng`.
+- Stored in a `HashMap<SessionToken, Session>` within the vault.
+- Zeroized when the session ends.
 - Child processes never receive the session token — they receive credentials
   via fd, not the token itself.
 
-In the embedded model, the HMAC key lives in the same process as the
-orchestrator, so a memory disclosure vulnerability in any loaded library
-compromises the signing key. This is an inherent limitation of the in-process
-architecture (see "Honest Assessment" above).
+**Why not HMAC-SHA256?** The token never leaves the process. The creator
+and validator are the same code. There is no network boundary and no
+untrusted party presenting tokens. A `HashMap` lookup provides identical
+security with no crypto dependencies, no key derivation ceremony, and
+fewer things to get wrong. The VM deployment model — where tokens cross
+a network boundary and stateless validation matters — will define its own
+token format appropriate to that trust model.
 
 ### Audit Log Integrity
 
-Audit entries are HMAC-signed with a key derived from the vault's DEK.
-Each entry includes a hash of the previous entry, forming a hash chain.
-Tampering with or deleting entries is detectable by verifying the chain.
+Each audit entry includes a SHA-256 hash of the previous entry, forming
+a hash chain. Tampering with or deleting entries in the SQLite file is
+detectable by verifying the chain with `verify_audit_chain()`.
 
-For high-security embedded deployments, the audit log should be replicated
-to a remote syslog or append-only storage before the local copy can be
-tampered with. This is a deployment concern, not a code requirement.
+**What this protects against:** Post-hoc forensic tampering — someone
+editing the SQLite audit database after the fact to cover tracks.
+
+**What this does NOT protect against:** A compromised orchestrator
+fabricating entries in real time. The hash chain is computed by the same
+process that writes entries. In-process integrity requires replication to
+a remote append-only store (syslog, S3 with object lock, etc.) — a
+deployment concern, not a code requirement.
 
 The SQLite audit database uses WAL mode and restrictive filesystem
 permissions (`0600`, owned by the zeroclaw process user).
 
-### Open Questions (For Human Review)
+### Resolved Questions (2026-03-29)
 
-1. **Credential output redaction.** Scanning tool output for credential
-   patterns before feeding to the LLM is imperfect — credentials don't
-   always have recognizable formats. Is this worth implementing, or is it
-   security theater that provides false confidence?
+1. **Credential output redaction.** Deferred. Pattern-based scanning
+   provides false confidence and doesn't catch non-standard formats. Build
+   only if real-world tool output demonstrates the need.
 
-2. **Re-authentication for long sessions.** Should sessions exceeding a
-   threshold (e.g., 30 minutes) require re-authentication via the
-   originating channel? This adds friction to long conversations but limits
-   damage from prompt injection that keeps a session alive.
+2. **Re-authentication for long sessions.** Not implemented for now.
+   `max_session_duration` provides a hard cap. Re-authentication adds
+   friction to the primary use case (long-running autonomous sessions).
+   Revisit if prompt injection attacks demonstrate session-extending
+   behavior in practice.
 
-3. **Sandboxing child processes.** `seccomp-bpf` (Linux) or `sandbox-exec`
-   (macOS, deprecated) can restrict child process syscalls. The
-   implementation cost is significant and platform-specific. Is this worth
-   the complexity for embedded deployments, or should we defer to the VM
-   model for high-security use cases?
+3. **Sandboxing child processes.** Deferred to VM model. High cost,
+   platform-specific, limited value when all tools are first-party.
 
-4. **Policy file integrity.** Should TOML policy files be signed or
-   checksum-verified on load? On single-user embedded devices, a local
-   attacker with filesystem write access could escalate their credential
-   scope by modifying `allowed_secrets` or `max_ttl`. Physical access is
-   already game over, so this may be low priority.
+4. **Policy file integrity.** Skipped. Incoherent without signing the
+   entire filesystem. Physical access to an embedded device is game over.
+
+5. **Session token format.** Random 128-bit tokens with `HashMap` lookup.
+   HMAC-SHA256 is appropriate for the VM model (network boundary, stateless
+   validation). Not for embedded (same-process, no untrusted presenter).
+
+6. **Multi-user sessions.** Embedded mode is single-user. No multi-user
+   session isolation within a single process. Multi-user requires the VM
+   deployment model.
 
 ## Implementation Phases
 
 ### Phase 1: Session Infrastructure (zerolease)
 
 - Add `Session` type: ID, user, channel, created_at, expires_at, policy
-- Add `SessionToken` type: HMAC-SHA256 signed, bound to session ID + nonce
-- Session token stored in `mlock`'d memory, zeroized on session end
+- Add `SessionToken` type: random 128-bit opaque handle, `HashMap` lookup
+- Session token zeroized on session end
 - Add session creation/validation/revocation to vault API
 - Add session policy configuration with `max_session_duration`,
   `max_renewals_per_lease`, `max_concurrent_leases`
 - Add tool-to-secret binding schema and policy enforcement
-- HMAC-signed audit log entries with hash chain
+- Extend `CredentialRequest` to carry optional `SessionToken`
+- Vault enforces session scope on lease requests when token is present
+- Audit log hash chain (SHA-256, tamper-evident for offline forensics)
 - Tests: session lifecycle, token validation, expiry, revocation,
   tool-to-secret binding enforcement, audit chain verification
 
-### Phase 2: Process Supervisor (zerolease)
-
-- `provision-run` command: takes session token + tool definition, manages
-  child lifecycle
-- Credential shim binary: reads credential from fd, sets env var, exec tool
-- Fd-based credential delivery (anonymous pipe / `memfd_create`)
-- Env var fallback with explicit opt-in and audit warning
-- Process group isolation: `setpgid(0, 0)` on spawn, `killpg` on revocation
-- Child process monitoring (exit, signals, timeout)
-- Lease revocation on process group termination
-- `prctl(PR_SET_DUMPABLE, 0)` on Linux when embedded-vault is active
-- Fail-closed: supervisor refuses to run if vault is unavailable
-  (no silent fallback to plaintext)
-- Tests: CLI wrapping end-to-end, timeout behavior, signal handling,
-  process group kill (verify grandchild processes are terminated),
-  fd credential delivery, core dump prevention
-
-### Phase 3: MCP Server Launching (zerolease)
-
-- Extend supervisor for long-lived stdio-transport children
-- MCP protocol proxying (stdin/stdout passthrough)
-- Batch completion detection: orchestrator signal AND idle timeout (default
-  10s) AND lease not expired — all three conditions required
-- Graceful shutdown sequence (SIGTERM → 5s wait → killpg SIGKILL)
-- Lease renewal subject to `max_renewals_per_lease`
-- Executable allowlisting (optional, logged warning for unrecognized binaries)
-- Tests: MCP server lifecycle, batch completion (all three conditions),
-  lease renewal cap, idle timeout behavior
-
-### Phase 4: Zeroclaw Integration
+### Phase 2: Zeroclaw Integration
 
 - Feature gate `embedded-vault` in `Cargo.toml`
 - In-process vault construction at startup (keychain + sqlite)
-- Wire `build_credential_provider()` to return vault-backed provider;
-  return error (not `StaticProvider`) if vault init fails
+- Wire `build_credential_provider()` to return session-aware
+  vault-backed provider; return error (not `StaticProvider`)
+  if vault init fails
 - Session creation on incoming user message
-- Tool registry integration: route tool calls through supervisor with
-  tool-to-secret binding enforcement
-- MCP config parsing: identify which MCP servers need credential injection
-- Credential output redaction: scan tool output for known credential
-  patterns before feeding to LLM context
+- Session token threaded through tool execution context to provider
+- Session revocation on conversation end / disconnect / timeout
+- Disable MCP server support when `embedded-vault` is active (all
+  tools must be built-in; MCP servers bypass `expose()` guarantees)
 - Tests: end-to-end with real vault, session-to-tool-call flow,
-  fail-closed behavior, credential redaction
+  fail-closed behavior, tool-to-secret binding rejection
 
 ## Relation to Existing Code
 
-| Existing code | Role in this design |
-|--------------|-------------------|
-| `CredentialProvider` trait (`zerolease-provider`) | Unchanged. Tools continue to call `acquire()`/`expose()`. |
-| `StaticProvider` (`zerolease-provider`) | Remains when `embedded-vault` is off and no external service is configured. NOT used as silent fallback when vault init fails — fail-closed behavior requires explicit opt-in. |
-| `build_credential_provider()` (zeroclaw `src/tools/mod.rs`) | Extended: when `embedded-vault` is on, constructs `ZeroleaseProvider` backed by in-process vault. Returns error on vault init failure. |
-| `Vault<K, S, A>` (`zerolease`) | Used directly in-process. New: session-aware lease requests, HMAC-signed audit entries. |
-| ADR-004 `ClientId` (zeroclaw) | Session ID composes with `ClientId` — a session is initiated by a client, and the client's identity is part of the session's trust root. |
-| `SecurityPolicy` (zeroclaw) | Orthogonal. Security policy governs what the *agent* may do; session policy governs what *credentials* the agent may access via tool-to-secret bindings. |
+| Existing code                                               | Role in this design                                                                                                                                                            |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `CredentialProvider` trait (`zerolease-provider`)           | Extended: `CredentialRequest` gains optional `SessionToken` field. Tools continue to call `acquire()`/`expose()` — the session token is threaded through by the orchestrator. |
+| `StaticProvider` (`zerolease-provider`)                     | Remains when `embedded-vault` is off and no external service is configured. NOT used as silent fallback when vault init fails — fail-closed behavior requires explicit opt-in. |
+| `build_credential_provider()` (zeroclaw `src/tools/mod.rs`) | Extended: when `embedded-vault` is on, constructs session-aware `ZeroleaseProvider` backed by in-process vault. Returns error on vault init failure.                           |
+| `Vault<K, S, A>` (`zerolease`)                              | Used directly in-process. New: session-aware lease requests, hash-chained audit entries.                                                                                       |
+| ADR-004 `ClientId` (zeroclaw)                               | Session ID composes with `ClientId` — a session is initiated by a client, and the client's identity is part of the session's trust root.                                       |
+| `SecurityPolicy` (zeroclaw)                                 | Orthogonal. Security policy governs what the _agent_ may do; session policy governs what _credentials_ the agent may access via tool-to-secret bindings.                       |
 
 ## Values
 
 In priority order, when design decisions conflict:
 
-1. **Zero-trust by default.** Per-request credential resolution is ideal;
-   per-session is the acceptable fallback. Never per-process or per-startup.
-   Fail closed, never open.
+1. **Secure by construction.** The `expose()` closure pattern means
+   credentials cannot escape their intended scope without an explicit
+   coding error. Prefer compile-time guarantees over runtime enforcement.
 2. **Honest about guarantees.** Embedded mode provides auditability and
-   defense-in-depth. It does not provide credential isolation from a
-   compromised orchestrator. Don't claim what you can't enforce.
-3. **Transparent to existing tools.** CLI tools and MCP servers must work
-   without modification. Credentials arrive via fd-to-env shim.
-4. **Observable.** Every credential access produces a signed audit event.
+   defense-in-depth against bugs and prompt injection. It does not provide
+   credential isolation from a compromised orchestrator. Don't claim what
+   you can't enforce.
+3. **Zero-trust by default.** Per-request credential resolution. Never
+   per-process or per-startup. Fail closed, never open.
+4. **Observable.** Every credential access produces an audit event.
    Silent failures are bugs. Audit integrity is verifiable.
 5. **Incrementally adoptable.** One tool at a time. The feature gate means
    zero cost when not used.
-6. **Simple over clever.** Flat policy files, fd injection, process group
-   supervision. No custom protocol, no agent-side SDK, no tool modifications.
+6. **Simple over clever.** Flat policy files, session-scoped leases, no
+   subprocess machinery, no custom protocol, no tool modifications.
