@@ -2,6 +2,15 @@
 
 zerolease is a credential vault for environments where AI coding agents need access to secrets they shouldn't be trusted to hold. This document explains the assumptions, threat model, and design decisions.
 
+## Related Documents
+
+- **[Credential Sidecar — Embedded Deployment](design-credential-sidecar-embedded.md)**:
+  Design for session-scoped credential access in the embedded (single-binary)
+  deployment model. Covers the process supervisor, fd-based credential delivery,
+  and tool-to-secret binding. This document extends the trust model below with
+  session-scoped tokens initiated by trusted user messages.
+- A companion cloud/VM sidecar design doc is planned.
+
 ## The Problem
 
 An AI coding agent that can run `git push`, call APIs, or deploy infrastructure needs credentials. The conventional approach — put `GITHUB_TOKEN` in the environment and let the agent use it — is dangerous:
@@ -35,7 +44,7 @@ zerolease replaces this with lease-based access: agents receive time-bounded, do
 | Component | Trust level |
 |-----------|------------|
 | The vault (host) | Fully trusted. Holds credentials, enforces policy. |
-| The orchestrator (Claw) | Fully trusted. Provisions VMs, manages tokens. |
+| The orchestrator (Claw) | Fully trusted in VM model. In the embedded model, session scoping provides defense-in-depth (see [sidecar design](design-credential-sidecar-embedded.md)). |
 | The proxy (VM) | Trusted infrastructure. Runs as a separate user, enforces leases at the network layer. |
 | The provisioner (VM) | Trusted infrastructure. Runs once, handles the vault token, exits. |
 | Claude Code (VM) | Untrusted. Receives credentials via env vars and config files. |

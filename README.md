@@ -124,6 +124,7 @@ JSON over length-prefixed frames (4-byte big-endian length + payload). Each conn
 ## Documentation
 
 - **[Design](docs/design.md)** — Threat model, core abstractions, design decisions, what this is not.
+- **[Credential Sidecar — Embedded](docs/design-credential-sidecar-embedded.md)** — Session-scoped credential access for single-binary deployments (Raspberry Pi, laptop). Process supervisor, fd-based credential delivery, tool-to-secret binding.
 - **[Embedded guide](docs/guide-embedded.md)** — Integrating zerolease into a Rust application (e.g., zeroclaw). In-process vault, no server.
 - **[Cloud service guide](docs/guide-cloud-service.md)** — Running the vault as a server with PostgreSQL or AWS Secrets Manager. Multiple clients over UDS/TCP.
 - **[VM deployment guide](docs/guide-vm-deployment.md)** — Full production deployment with QEMU VMs, credential provisioner, lease-aware proxy, and iptables network jail.

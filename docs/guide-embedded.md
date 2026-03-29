@@ -146,12 +146,26 @@ for event in events {
 
 ## Adapting zeroclaw
 
-[zeroclaw](https://github.com/ceejbot/zeroclaw) has a built-in credential store. To replace it with zerolease:
+[zeroclaw](https://github.com/ceejbot/zeroclaw) is the primary consumer of the embedded model. The integration is described in detail in the
+[Credential Sidecar — Embedded Deployment](design-credential-sidecar-embedded.md) design doc.
 
-1. **Add the zerolease dependencies** to zeroclaw's `Cargo.toml`.
-2. **Replace the built-in vault** with `Vault<KeychainSource, RusqliteStore, RusqliteAuditLog>`. zeroclaw already uses rusqlite, so the `zerolease-store-rusqlite` crate avoids `libsqlite3-sys` link conflicts (it uses rusqlite, not sqlx).
-3. **Adapt tool credential injection.** Where zeroclaw currently hands tools a raw credential string, replace with the lease-and-access pattern above. Each tool gets a `LeaseGuard` scoped to the domain it needs.
-4. **Configure the policy engine** from zeroclaw's existing permission model. The flat grant list maps naturally to zeroclaw's per-tool permission declarations.
-5. **Wire the audit log** to zeroclaw's observability. The `RusqliteAuditLog` is queryable; the `TracingAuditLog` emits structured events to the tracing subscriber.
+The high-level approach:
 
-The key change is moving from "tool holds a credential for its lifetime" to "tool leases a credential for each operation." The vault's domain scoping and TTLs prevent lateral movement even if a tool is compromised.
+1. **Feature gate `embedded-vault`** in zeroclaw's `Cargo.toml` pulls in
+   the full zerolease crate with vault, SQLite store, and keychain support.
+2. **In-process vault** constructed at startup:
+   `Vault<KeychainSource, RusqliteStore, RusqliteAuditLog>`.
+3. **Session-scoped access**: each incoming user message creates a session;
+   credentials are leased within that session's scope and revoked when the
+   session ends.
+4. **Process supervisor** wraps CLI tools and MCP servers — credentials are
+   delivered via anonymous pipe (fd-based), not environment variables. A
+   thin credential shim reads the fd, sets the env var, and `exec`s the tool.
+5. **Tool-to-secret bindings** in the policy ensure each tool can only access
+   the credentials it needs.
+6. **Fail-closed**: if vault initialization fails, zeroclaw refuses to start
+   rather than falling back to plaintext credentials.
+
+zeroclaw's existing `CredentialProvider` trait and `build_credential_provider()`
+function are the integration points — tools are unaware of the vault. See
+the design doc for implementation phases and security considerations.
