@@ -1,7 +1,7 @@
 [package]
 name = "zerolease-store-aws-sm"
-version = "0.1.0"
 description = "AWS Secrets Manager-backed SecretStore for zerolease"
+version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true

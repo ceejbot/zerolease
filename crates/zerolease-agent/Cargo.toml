@@ -1,7 +1,7 @@
 [package]
 name = "zerolease-agent"
-version = "0.1.0"
 description = "VM-side agent: credential provisioner, lease-aware proxy, git credential helper"
+version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true

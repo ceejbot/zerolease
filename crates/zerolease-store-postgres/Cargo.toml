@@ -4,8 +4,8 @@
 
 [package]
 name = "zerolease-store-postgres"
-version = "0.1.0"
 description = "PostgreSQL-backed storage backends for zerolease (SecretStore + AuditLog)"
+version = "0.1.0"
 edition = "2024"
 authors = ["C J Silverio <ceejceej@gmail.com>"]
 license = "Apache-2.0"

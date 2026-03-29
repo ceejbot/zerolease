@@ -7,6 +7,7 @@ exclude = ["crates/zerolease-store-postgres"]
 resolver = "3"
 
 [workspace.package]
+version = "0.1.0"
 edition = "2024"
 authors = ["C J Silverio <ceejceej@gmail.com>"]
 license = "Apache-2.0"
@@ -37,10 +38,10 @@ zerolease = { path = ".", default-features = false }
 
 [package]
 name = "zerolease"
-authors.workspace = true
-version = "0.1.0"
-edition.workspace = true
 description = "A lightweight, agent-aware credential vault with lease-based access control"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
 license.workspace = true
 repository.workspace = true
 keywords = ["credentials", "vault", "security", "agents", "secrets"]
@@ -58,7 +59,7 @@ chrono.workspace = true
 secrecy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2 = "0.10"
+sha2 = "0.11"
 thiserror.workspace = true
 tokio.workspace = true
 tracing = "0.1"

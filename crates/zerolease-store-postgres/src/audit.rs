@@ -146,49 +146,91 @@ mod tests {
     }
 
     async fn test_audit_log() -> PostgresAuditLog {
-        let log = PostgresAuditLog::new(&test_url())
+        PostgresAuditLog::new(&test_url())
             .await
-            .expect("should create audit log");
-        sqlx::query("DELETE FROM audit_events")
-            .execute(&log.pool)
-            .await
-            .expect("should clean test data");
-        log
+            .expect("should create audit log")
     }
 
     fn make_entry(agent: &str, event: AuditEvent) -> AuditEntry {
         AuditEntry::new(event, AgentId::new(agent), &PeerIdentity::Anonymous, AuditOutcome::Success)
     }
 
+    /// Clean up audit events for a specific agent (each test cleans its own data).
+    async fn cleanup_agent(log: &PostgresAuditLog, agent: &str) {
+        sqlx::query("DELETE FROM audit_events WHERE agent = $1")
+            .bind(agent)
+            .execute(&log.pool)
+            .await
+            .expect("should clean up agent events");
+    }
+
+    /// Clean up audit events for a specific secret name.
+    async fn cleanup_secret(log: &PostgresAuditLog, secret: &str) {
+        sqlx::query("DELETE FROM audit_events WHERE secret_name = $1")
+            .bind(secret)
+            .execute(&log.pool)
+            .await
+            .expect("should clean up secret events");
+    }
+
+    /// Clean up audit events for a specific lease.
+    async fn cleanup_lease(log: &PostgresAuditLog, lease: &LeaseId) {
+        sqlx::query("DELETE FROM audit_events WHERE lease_id = $1")
+            .bind(lease.as_uuid().to_string())
+            .execute(&log.pool)
+            .await
+            .expect("should clean up lease events");
+    }
+
     #[tokio::test]
     #[ignore] // requires running PostgreSQL with zerolease_test database
     async fn record_and_query_by_agent() {
         let log = test_audit_log().await;
+        // Use unique agent names to avoid collisions with other tests.
+        cleanup_agent(&log, "test-alice").await;
+        cleanup_agent(&log, "test-bob").await;
+
         for _ in 0..3 {
-            log.record(make_entry("alice", AuditEvent::DekRotated)).await.expect("record");
+            log.record(make_entry("test-alice", AuditEvent::DekRotated))
+                .await
+                .expect("record should succeed");
         }
-        log.record(make_entry("bob", AuditEvent::DekRotated)).await.expect("record");
+        log.record(make_entry("test-bob", AuditEvent::DekRotated))
+            .await
+            .expect("record should succeed");
 
-        let results = log.query_by_agent(&AgentId::new("alice"), 10).await.expect("query");
-        assert_eq!(results.len(), 3);
+        let results = log.query_by_agent(&AgentId::new("test-alice"), 10).await.expect("query");
+        assert_eq!(results.len(), 3, "alice should have 3 events");
 
-        let bob = log.query_by_agent(&AgentId::new("bob"), 10).await.expect("query");
-        assert_eq!(bob.len(), 1);
+        let bob = log.query_by_agent(&AgentId::new("test-bob"), 10).await.expect("query");
+        assert_eq!(bob.len(), 1, "bob should have 1 event");
+
+        cleanup_agent(&log, "test-alice").await;
+        cleanup_agent(&log, "test-bob").await;
     }
 
     #[tokio::test]
     #[ignore]
     async fn query_by_secret() {
         let log = test_audit_log().await;
-        log.record(make_entry("agent", AuditEvent::LeaseGranted {
+        cleanup_secret(&log, "pg-audit-secret-a").await;
+
+        log.record(make_entry("audit-agent", AuditEvent::LeaseGranted {
             lease_id: LeaseId::new(),
-            secret_name: SecretName::new("pg-secret-a"),
+            secret_name: SecretName::new("pg-audit-secret-a"),
             domains: vec![DomainScope::new("api.example.com")],
             ttl_seconds: 900,
-        })).await.expect("record");
+        }))
+        .await
+        .expect("record should succeed");
 
-        let results = log.query_by_secret(&SecretName::new("pg-secret-a"), 10).await.expect("query");
-        assert_eq!(results.len(), 1);
+        let results = log
+            .query_by_secret(&SecretName::new("pg-audit-secret-a"), 10)
+            .await
+            .expect("query should succeed");
+        assert_eq!(results.len(), 1, "should find 1 event for the secret");
+
+        cleanup_secret(&log, "pg-audit-secret-a").await;
     }
 
     #[tokio::test]
@@ -196,14 +238,19 @@ mod tests {
     async fn query_by_lease() {
         let log = test_audit_log().await;
         let lease = LeaseId::new();
-        log.record(make_entry("agent", AuditEvent::LeaseGranted {
+
+        log.record(make_entry("audit-agent", AuditEvent::LeaseGranted {
             lease_id: lease,
-            secret_name: SecretName::new("pg-secret"),
+            secret_name: SecretName::new("pg-audit-lease-secret"),
             domains: vec![DomainScope::new("example.com")],
             ttl_seconds: 900,
-        })).await.expect("record");
+        }))
+        .await
+        .expect("record should succeed");
 
-        let results = log.query_by_lease(&lease).await.expect("query");
-        assert_eq!(results.len(), 1);
+        let results = log.query_by_lease(&lease).await.expect("query should succeed");
+        assert_eq!(results.len(), 1, "should find 1 event for the lease");
+
+        cleanup_lease(&log, &lease).await;
     }
 }
