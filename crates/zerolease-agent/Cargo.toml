@@ -1,24 +1,25 @@
 [package]
-name = "zerolease-cli"
+name = "zerolease-agent"
 version = "0.1.0"
-description = "CLI wrapper that acquires zerolease credentials for Claude Code agents"
+description = "VM-side agent: credential provisioner, lease-aware proxy, git credential helper"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [[bin]]
-name = "zerolease-cli"
+name = "zerolease-agent"
 path = "src/main.rs"
 
 [dependencies]
+chrono.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
-secrecy = { workspace = true }
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid.workspace = true
 zerolease = { workspace = true, default-features = false }
 
 [dev-dependencies]
@@ -27,7 +28,7 @@ tempfile = "3"
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", features = ["process"] }
 
-# Can't use workspace lints because this binary needs unsafe for execvp.
+# Can't use workspace lints because the provisioner needs unsafe for env::set_var.
 [lints.rust]
 unsafe_code = "allow"
 future_incompatible = { level = "deny", priority = 1 }

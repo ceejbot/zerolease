@@ -26,26 +26,26 @@ The manifest is a JSON file describing what to acquire and how to inject it. Eac
 
 ```json
 {
-  "credentials": [
-    {
-      "secret_name": "github-pat",
-      "target_domain": "github.com",
-      "inject": [
-        { "type": "env", "var": "GH_TOKEN" },
-        { "type": "git_credential", "host": "github.com" }
-      ]
-    }
-  ]
+	"credentials": [
+		{
+			"secret_name": "github-pat",
+			"target_domain": "github.com",
+			"inject": [
+				{ "type": "env", "var": "GH_TOKEN" },
+				{ "type": "git_credential", "host": "github.com" }
+			]
+		}
+	]
 }
 ```
 
 ### Injection mechanisms
 
-| Type | What it does | Use when |
-|------|-------------|----------|
-| `env` | Sets an environment variable | Tool reads a specific env var |
-| `file` | Writes a config file from a template | Tool reads a config file on disk |
-| `git_credential` | Registers a git credential helper mapping | Tool is git (HTTPS) |
+| Type             | What it does                              | Use when                         |
+| ---------------- | ----------------------------------------- | -------------------------------- |
+| `env`            | Sets an environment variable              | Tool reads a specific env var    |
+| `file`           | Writes a config file from a template      | Tool reads a config file on disk |
+| `git_credential` | Registers a git credential helper mapping | Tool is git (HTTPS)              |
 
 For `file`, the template uses `${SECRET}` as the placeholder for the credential value. Files are written with mode 0600.
 
@@ -57,11 +57,9 @@ Git's credential helper protocol gives us **per-request domain validation** — 
 
 ```json
 {
-  "secret_name": "github-pat",
-  "target_domain": "github.com",
-  "inject": [
-    { "type": "git_credential", "host": "github.com" }
-  ]
+	"secret_name": "github-pat",
+	"target_domain": "github.com",
+	"inject": [{ "type": "git_credential", "host": "github.com" }]
 }
 ```
 
@@ -86,11 +84,9 @@ Then use the `git_credential` mechanism as shown above.
 
 ```json
 {
-  "secret_name": "deploy-ssh-key",
-  "target_domain": "github.com",
-  "inject": [
-    { "type": "file", "path": "~/.ssh/id_ed25519", "template": "${SECRET}" }
-  ]
+	"secret_name": "deploy-ssh-key",
+	"target_domain": "github.com",
+	"inject": [{ "type": "file", "path": "~/.ssh/id_ed25519", "template": "${SECRET}" }]
 }
 ```
 
@@ -102,12 +98,12 @@ The `gh` CLI reads the `GH_TOKEN` environment variable. Inject it alongside the 
 
 ```json
 {
-  "secret_name": "github-pat",
-  "target_domain": "github.com",
-  "inject": [
-    { "type": "env", "var": "GH_TOKEN" },
-    { "type": "git_credential", "host": "github.com" }
-  ]
+	"secret_name": "github-pat",
+	"target_domain": "github.com",
+	"inject": [
+		{ "type": "env", "var": "GH_TOKEN" },
+		{ "type": "git_credential", "host": "github.com" }
+	]
 }
 ```
 
@@ -119,11 +115,9 @@ Any tool that reads a credential from an environment variable works the same way
 
 ```json
 {
-  "secret_name": "fastly-api-key",
-  "target_domain": "api.fastly.com",
-  "inject": [
-    { "type": "env", "var": "FASTLY_API_KEY" }
-  ]
+	"secret_name": "fastly-api-key",
+	"target_domain": "api.fastly.com",
+	"inject": [{ "type": "env", "var": "FASTLY_API_KEY" }]
 }
 ```
 
@@ -141,12 +135,12 @@ AWS OIDC federation doesn't use a static secret — it exchanges a JWT for tempo
 
 ```json
 {
-  "secret_name": "aws-cross-account-creds",
-  "target_domain": "sts.amazonaws.com",
-  "inject": [
-    { "type": "env", "var": "AWS_ACCESS_KEY_ID" },
-    { "type": "env", "var": "AWS_SECRET_ACCESS_KEY" }
-  ]
+	"secret_name": "aws-cross-account-creds",
+	"target_domain": "sts.amazonaws.com",
+	"inject": [
+		{ "type": "env", "var": "AWS_ACCESS_KEY_ID" },
+		{ "type": "env", "var": "AWS_SECRET_ACCESS_KEY" }
+	]
 }
 ```
 
@@ -154,11 +148,15 @@ But note: the vault stores a single secret value per name. For AWS, you'd need t
 
 ```json
 {
-  "secret_name": "aws-cross-account",
-  "target_domain": "sts.amazonaws.com",
-  "inject": [
-    { "type": "file", "path": "~/.aws/credentials", "template": "[default]\naws_access_key_id = AKIAEXAMPLE\naws_secret_access_key = ${SECRET}" }
-  ]
+	"secret_name": "aws-cross-account",
+	"target_domain": "sts.amazonaws.com",
+	"inject": [
+		{
+			"type": "file",
+			"path": "~/.aws/credentials",
+			"template": "[default]\naws_access_key_id = AKIAEXAMPLE\naws_secret_access_key = ${SECRET}"
+		}
+	]
 }
 ```
 
@@ -170,12 +168,12 @@ npm reads authentication from `.npmrc` or the `NPM_TOKEN` environment variable:
 
 ```json
 {
-  "secret_name": "npm-token",
-  "target_domain": "registry.npmjs.org",
-  "inject": [
-    { "type": "env", "var": "NPM_TOKEN" },
-    { "type": "file", "path": "~/.npmrc", "template": "//registry.npmjs.org/:_authToken=${SECRET}" }
-  ]
+	"secret_name": "npm-token",
+	"target_domain": "registry.npmjs.org",
+	"inject": [
+		{ "type": "env", "var": "NPM_TOKEN" },
+		{ "type": "file", "path": "~/.npmrc", "template": "//registry.npmjs.org/:_authToken=${SECRET}" }
+	]
 }
 ```
 
@@ -183,9 +181,9 @@ For private registries, replace the registry URL:
 
 ```json
 {
-  "type": "file",
-  "path": "~/.npmrc",
-  "template": "//npm.pkg.github.com/:_authToken=${SECRET}\n@myorg:registry=https://npm.pkg.github.com"
+	"type": "file",
+	"path": "~/.npmrc",
+	"template": "//npm.pkg.github.com/:_authToken=${SECRET}\n@myorg:registry=https://npm.pkg.github.com"
 }
 ```
 
@@ -195,11 +193,15 @@ pip reads credentials from `~/.config/pip/pip.conf` or index URLs:
 
 ```json
 {
-  "secret_name": "pypi-token",
-  "target_domain": "pypi.org",
-  "inject": [
-    { "type": "file", "path": "~/.config/pip/pip.conf", "template": "[global]\nextra-index-url = https://__token__:${SECRET}@pypi.org/simple/" }
-  ]
+	"secret_name": "pypi-token",
+	"target_domain": "pypi.org",
+	"inject": [
+		{
+			"type": "file",
+			"path": "~/.config/pip/pip.conf",
+			"template": "[global]\nextra-index-url = https://__token__:${SECRET}@pypi.org/simple/"
+		}
+	]
 }
 ```
 
@@ -209,11 +211,9 @@ Cargo reads registry tokens from `CARGO_REGISTRIES_<NAME>_TOKEN`:
 
 ```json
 {
-  "secret_name": "crates-io-token",
-  "target_domain": "crates.io",
-  "inject": [
-    { "type": "env", "var": "CARGO_REGISTRIES_CRATES_IO_TOKEN" }
-  ]
+	"secret_name": "crates-io-token",
+	"target_domain": "crates.io",
+	"inject": [{ "type": "env", "var": "CARGO_REGISTRIES_CRATES_IO_TOKEN" }]
 }
 ```
 
@@ -223,11 +223,15 @@ Docker reads credentials from `~/.docker/config.json`:
 
 ```json
 {
-  "secret_name": "docker-hub-token",
-  "target_domain": "index.docker.io",
-  "inject": [
-    { "type": "file", "path": "~/.docker/config.json", "template": "{\"auths\":{\"https://index.docker.io/v1/\":{\"auth\":\"${SECRET}\"}}}" }
-  ]
+	"secret_name": "docker-hub-token",
+	"target_domain": "index.docker.io",
+	"inject": [
+		{
+			"type": "file",
+			"path": "~/.docker/config.json",
+			"template": "{\"auths\":{\"https://index.docker.io/v1/\":{\"auth\":\"${SECRET}\"}}}"
+		}
+	]
 }
 ```
 
@@ -239,11 +243,9 @@ For tools that connect to databases via connection strings:
 
 ```json
 {
-  "secret_name": "postgres-url",
-  "target_domain": "db.internal.example.com",
-  "inject": [
-    { "type": "env", "var": "DATABASE_URL" }
-  ]
+	"secret_name": "postgres-url",
+	"target_domain": "db.internal.example.com",
+	"inject": [{ "type": "env", "var": "DATABASE_URL" }]
 }
 ```
 
