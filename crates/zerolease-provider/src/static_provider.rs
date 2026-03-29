@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 
 use secrecy::SecretString;
-use zerolease::types::SecretName;
+use zerolease_types::SecretName;
 
 use crate::credential::CredentialGuard;
 use crate::error::ProviderError;

@@ -35,7 +35,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use zerolease::error::{Error, Result};
 use zerolease::store::{
-    BatchUpdateItem, CipherAlgorithm, SecretKind, SecretMetadata, SecretStore, StoreSecretParams, StoredSecret,
+    parse_cipher_algorithm, parse_secret_kind, BatchUpdateItem, CipherAlgorithm, SecretKind, SecretMetadata,
+    SecretStore, StoreSecretParams, StoredSecret,
 };
 use zerolease::types::{SecretId, SecretName};
 
@@ -122,8 +123,8 @@ impl SecretPayload {
             name: SecretName::new(self.name),
             ciphertext: self.ciphertext,
             nonce: self.nonce,
-            algorithm: CipherAlgorithm::parse_db(&self.algorithm)?,
-            kind: SecretKind::parse_db(&self.kind)?,
+            algorithm: parse_cipher_algorithm(&self.algorithm)?,
+            kind: parse_secret_kind(&self.kind)?,
             description: self.description,
             created_at: self.created_at,
             updated_at: self.updated_at,
@@ -413,7 +414,7 @@ impl SecretStore for AwsSecretsManagerStore {
                 let tags = secret.tags();
 
                 let kind_tag = MetadataTag::Kind.find(tags).unwrap_or_default();
-                let kind = match SecretKind::parse_db(&kind_tag) {
+                let kind = match parse_secret_kind(&kind_tag) {
                     Ok(k) => k,
                     Err(e) => {
                         tracing::warn!(

@@ -6,7 +6,7 @@
 //! handle to a secret. This replaces the static `String` credential
 //! fields that tools typically store for their entire process lifetime.
 
-use zerolease::types::{AgentId, DomainScope, SecretName};
+use zerolease_types::{AgentId, DomainScope, SecretName};
 
 use crate::credential::CredentialGuard;
 use crate::error::ProviderError;

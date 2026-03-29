@@ -14,10 +14,11 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["sync", "rt"] }
 tracing = "0.1"
 uuid.workspace = true
-zerolease = { workspace = true, default-features = false }
+zerolease = { workspace = true, default-features = false, optional = true }
+zerolease-types = { workspace = true }
 
 [features]
-vault = []
+vault = ["dep:zerolease"]
 
 [lints]
 workspace = true

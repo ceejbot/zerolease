@@ -10,7 +10,7 @@
 use secrecy::{ExposeSecret, SecretString};
 use tokio::sync::mpsc;
 use uuid::Uuid;
-use zerolease::types::DomainScope;
+use zerolease_types::DomainScope;
 
 /// A handle to an active credential. The secret value is accessible
 /// only through [`expose()`](Self::expose) and is zeroized when this

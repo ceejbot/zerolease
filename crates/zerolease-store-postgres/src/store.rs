@@ -7,8 +7,8 @@ use uuid::Uuid;
 
 use zerolease::error::{Error, Result};
 use zerolease::store::{
-    BatchUpdateItem, CipherAlgorithm, SecretKind, SecretMetadata, SecretStore, StoreSecretParams,
-    StoredSecret,
+    parse_cipher_algorithm, parse_secret_kind, BatchUpdateItem, CipherAlgorithm, SecretKind,
+    SecretMetadata, SecretStore, StoreSecretParams, StoredSecret,
 };
 use zerolease::types::{SecretId, SecretName};
 
@@ -215,8 +215,8 @@ fn row_to_stored_secret(row: &sqlx::postgres::PgRow) -> Result<StoredSecret> {
         name: SecretName::new(col!(row, "name", String)),
         ciphertext: col!(row, "ciphertext", Vec<u8>),
         nonce: col!(row, "nonce", Vec<u8>),
-        algorithm: CipherAlgorithm::parse_db(&col!(row, "algorithm", String))?,
-        kind: SecretKind::parse_db(&col!(row, "kind", String))?,
+        algorithm: parse_cipher_algorithm(&col!(row, "algorithm", String))?,
+        kind: parse_secret_kind(&col!(row, "kind", String))?,
         description: col!(row, "description", Option<String>),
         created_at: col!(row, "created_at", DateTime<Utc>),
         updated_at: col!(row, "updated_at", DateTime<Utc>),
@@ -228,7 +228,7 @@ fn row_to_metadata(row: &sqlx::postgres::PgRow) -> Result<SecretMetadata> {
     Ok(SecretMetadata {
         id: parse_id(row)?,
         name: SecretName::new(col!(row, "name", String)),
-        kind: SecretKind::parse_db(&col!(row, "kind", String))?,
+        kind: parse_secret_kind(&col!(row, "kind", String))?,
         description: col!(row, "description", Option<String>),
         created_at: col!(row, "created_at", DateTime<Utc>),
         updated_at: col!(row, "updated_at", DateTime<Utc>),

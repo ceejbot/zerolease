@@ -1,0 +1,16 @@
+[package]
+name = "zerolease-types"
+version = "0.1.0"
+description = "Shared type definitions for the zerolease credential vault"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+chrono = { workspace = true }
+serde = { workspace = true }
+uuid = { workspace = true }
+
+[lints]
+workspace = true

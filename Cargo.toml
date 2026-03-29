@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/zerolease-provider", "crates/zerolease-store-rusqlite", "crates/zerolease-store-aws-sm", "crates/zerolease-agent"]
+members = [".", "crates/zerolease-provider", "crates/zerolease-store-rusqlite", "crates/zerolease-store-aws-sm", "crates/zerolease-agent", "crates/zerolease-types"]
 # zerolease-store-postgres excluded from default workspace due to sqlx v0.8
 # libsqlite3-sys conflict with rusqlite. Build/test it separately:
 #   cargo check -p zerolease-store-postgres --manifest-path crates/zerolease-store-postgres/Cargo.toml
@@ -35,6 +35,7 @@ thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v7", "serde"] }
 zerolease = { path = ".", default-features = false }
+zerolease-types = { path = "crates/zerolease-types" }
 
 [package]
 name = "zerolease"
@@ -50,6 +51,7 @@ categories = ["authentication", "cryptography"]
 
 [dependencies]
 aes-gcm = "0.10"
+zerolease-types.workspace = true
 async-trait.workspace = true
 aws-config = { version = "1", optional = true }
 aws-sdk-kms = { version = "1", optional = true }
