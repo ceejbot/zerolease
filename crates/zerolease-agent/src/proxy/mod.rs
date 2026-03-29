@@ -151,7 +151,9 @@ async fn lease_refresh_loop(
             }
             Err(e) => {
                 tracing::warn!(error = %e, "failed to reload lease state");
-                // Keep existing state — don't clear on read failure.
+                // Still prune expired leases from cached state (Finding 14).
+                let mut guard = state.write().await;
+                guard.prune_expired();
             }
         }
     }

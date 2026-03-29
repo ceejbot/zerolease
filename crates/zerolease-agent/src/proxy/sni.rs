@@ -16,9 +16,9 @@ use tokio::net::TcpStream;
 use super::SharedLeaseState;
 
 /// Maximum bytes to peek for the TLS ClientHello.
-/// A typical ClientHello is under 512 bytes, but extensions can
-/// push it larger. 4 KiB is generous.
-const MAX_CLIENT_HELLO: usize = 4096;
+/// Modern TLS 1.3 with many extensions and key shares can exceed
+/// 4 KiB. 16 KiB is the maximum TLS record size.
+const MAX_CLIENT_HELLO: usize = 16384;
 
 /// Handle one transparent proxy connection.
 ///
@@ -45,6 +45,9 @@ pub async fn handle_transparent(
             return Ok(());
         }
     };
+
+    // Normalize to lowercase (Finding 6).
+    let domain = domain.to_ascii_lowercase();
 
     // Check lease state.
     let allowed = {
