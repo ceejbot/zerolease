@@ -67,8 +67,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ).await?;
 
     let audit = TracingAuditLog::new();
-    let policy = PolicyEngine::new(load_grants_from_config()?);
-    let vault = Arc::new(Vault::new(key_source, store, audit, policy));
+    let policy = PolicyEngine::new(PolicyConfig::from_file("policy.json")?);
+    let vault = Vault::new(key_source, store, audit, policy, CipherAlgorithm::Aes256Gcm);
+    vault.initialize().await?;
+    let vault = Arc::new(vault);
 
     let listener = UdsListener::bind("/var/run/zerolease/vault.sock")?;
     let authenticator = Arc::new(your_authenticator());
@@ -120,6 +122,45 @@ Three roles are available:
 - **Admin**: Can store, delete, list secrets, and perform all lease operations.
 - **Agent**: Bound to a single agent identity. Can only request/access/revoke leases. The agent field in requests is ignored — the server substitutes the bound identity.
 - **Orchestrator**: Trusted to assert any agent identity per request. For systems acting on behalf of multiple agents.
+
+## Policy Configuration
+
+Policies can be loaded from a JSON file with `PolicyConfig::from_file()`:
+
+```json
+{
+  "default_lease_terms": {
+    "ttl": [900, 0],
+    "renewable": false,
+    "max_uses": null
+  },
+  "grants": [
+    {
+      "agent": { "Exact": "tool-git" },
+      "secret": { "Exact": "github-pat" },
+      "allowed_domains": ["github.com"],
+      "lease_terms": {
+        "ttl": [900, 0],
+        "renewable": false,
+        "max_uses": 10
+      }
+    },
+    {
+      "agent": { "Prefix": "ci-" },
+      "secret": "Any",
+      "allowed_domains": ["*.internal.example.com"],
+      "lease_terms": null
+    }
+  ]
+}
+```
+
+Agent and secret patterns support three forms:
+- `{ "Exact": "name" }` — matches exactly one agent/secret
+- `{ "Prefix": "ci-" }` — matches any name starting with the prefix
+- `"Any"` — matches everything (use with caution)
+
+The `lease_terms` field is optional. If `null`, the `default_lease_terms` from the top level are used. `ttl` is a `[seconds, nanoseconds]` tuple (chrono's `TimeDelta` serialization).
 
 ## Client Usage
 

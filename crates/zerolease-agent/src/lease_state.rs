@@ -12,10 +12,20 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// The complete lease state for this VM's prompt run.
+/// Current lease state schema version.
+pub const LEASE_STATE_VERSION: u32 = 1;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LeaseState {
+    /// Schema version. The proxy rejects files with unknown versions.
+    #[serde(default = "default_version")]
+    pub version: u32,
     /// Domain → lease info. The proxy checks this on every CONNECT.
     pub leases: HashMap<String, LeaseInfo>,
+}
+
+fn default_version() -> u32 {
+    LEASE_STATE_VERSION
 }
 
 /// Information about a single active lease.
@@ -29,7 +39,10 @@ pub struct LeaseInfo {
 
 impl LeaseState {
     pub fn new() -> Self {
-        Self { leases: HashMap::new() }
+        Self {
+            version: LEASE_STATE_VERSION,
+            leases: HashMap::new(),
+        }
     }
 
     /// Check if a domain has an active (non-expired) lease.

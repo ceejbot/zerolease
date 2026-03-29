@@ -39,11 +39,41 @@ zerolease-store-rusqlite = { version = "0.1" }
 
 ## Integration Pattern
 
-### 1. Initialize the vault at startup
+### 1. Configure the policy
+
+```rust
+use zerolease::lease::LeaseTerms;
+use zerolease::policy::{AgentPattern, PolicyConfig, PolicyEngine, PolicyGrant, SecretPattern};
+use zerolease::types::{AgentId, DomainScope, SecretName};
+
+let policy = PolicyEngine::new(PolicyConfig {
+    default_lease_terms: LeaseTerms::default_short(), // 15 min, non-renewable
+    grants: vec![
+        PolicyGrant {
+            agent: AgentPattern::Exact(AgentId::new("tool-git")),
+            secret: SecretPattern::Exact(SecretName::new("github-pat")),
+            allowed_domains: vec![DomainScope::new("github.com")],
+            lease_terms: Some(LeaseTerms {
+                ttl: chrono::TimeDelta::minutes(15),
+                renewable: false,
+                max_uses: Some(10),
+            }),
+        },
+    ],
+});
+```
+
+Policy can also be loaded from a JSON file (see [cloud service guide](guide-cloud-service.md)):
+
+```rust
+let policy = PolicyEngine::new(PolicyConfig::from_file("policy.json")?);
+```
+
+### 2. Initialize the vault at startup
 
 ```rust
 use zerolease::keysource::keychain::KeychainSource;
-use zerolease::policy::PolicyEngine;
+use zerolease::store::CipherAlgorithm;
 use zerolease::vault::Vault;
 use zerolease_store_rusqlite::{RusqliteStore, RusqliteAuditLog};
 
@@ -54,19 +84,16 @@ let key_source = KeychainSource::new("myapp", "vault-dek").await?;
 let store = RusqliteStore::new("secrets.db").await?;
 let audit = RusqliteAuditLog::new("audit.db").await?;
 
-// Configure the policy engine.
-let policy = PolicyEngine::new(grants);
-
-// Create the vault.
-let vault = Vault::new(key_source, store, audit, policy);
+// Create and initialize the vault.
+let vault = Vault::new(key_source, store, audit, policy, CipherAlgorithm::Aes256Gcm);
+vault.initialize().await?;
 ```
 
-### 2. Store credentials (admin operation)
+### 3. Store credentials (admin operation)
 
 ```rust
 use zerolease::store::SecretKind;
 use zerolease::transport::PeerIdentity;
-use zerolease::types::SecretName;
 
 vault.store_secret(
     &SecretName::new("github-pat"),
@@ -75,24 +102,6 @@ vault.store_secret(
     Some("GitHub PAT for repo access".into()),
     &PeerIdentity::Anonymous,  // admin, no transport peer
 ).await?;
-```
-
-### 3. Grant access via policy
-
-```rust
-use zerolease::policy::{PolicyGrant, GrantScope};
-use zerolease::types::{AgentId, DomainScope, SecretName};
-
-let grants = vec![
-    PolicyGrant {
-        agent: AgentId::new("tool-git"),
-        secret: SecretName::new("github-pat"),
-        domains: vec![DomainScope::new("github.com")],
-        max_ttl_seconds: 900,      // 15 minutes
-        max_uses: Some(10),
-        renewable: false,
-    },
-];
 ```
 
 ### 4. Lease credentials per-tool
@@ -111,7 +120,7 @@ let grant = vault.request_lease(
 // Tool accesses the secret through the lease.
 let guard = vault.access_secret(
     &grant.lease_id,
-    &DomainScope::new("github.com"),
+    "github.com",  // target domain as &str
     &peer,
 ).await?;
 
