@@ -3,18 +3,18 @@
 //!
 //! Three subcommands:
 //!
-//! - `provision`: Acquire credentials from the vault, write env vars
-//!   and config files, write lease state for the proxy, exit.
-//! - `proxy`: Lease-aware HTTPS CONNECT proxy that blocks traffic
-//!   when leases expire or are revoked.
+//! - `provision`: Acquire credentials from the vault, write env vars and config
+//!   files, write lease state for the proxy, exit.
+//! - `proxy`: Lease-aware HTTPS CONNECT proxy that blocks traffic when leases
+//!   expire or are revoked.
 //! - `credential-fill`: Git credential helper protocol.
 
 mod config_writer;
 mod git_credential;
 pub mod lease_state;
 mod manifest;
-mod proxy;
 mod provision;
+mod proxy;
 
 use std::process::ExitCode;
 
@@ -102,9 +102,7 @@ async fn cmd_credential_fill(args: CredentialFillArgs) -> ExitCode {
         }
     };
 
-    let vault_addr: std::net::SocketAddr = match std::env::var("ZEROLEASE_VAULT_ADDR")
-        .ok()
-        .and_then(|s| s.parse().ok())
+    let vault_addr: std::net::SocketAddr = match std::env::var("ZEROLEASE_VAULT_ADDR").ok().and_then(|s| s.parse().ok())
     {
         Some(a) => a,
         None => {

@@ -148,8 +148,7 @@ pub async fn run(args: ProvisionArgs) -> ExitCode {
     }
 
     // Add vault address for credential-fill (but NOT the prompt-run token).
-    writeln!(env_lines, "export ZEROLEASE_VAULT_ADDR='{}'", args.vault_addr)
-        .expect("string write infallible");
+    writeln!(env_lines, "export ZEROLEASE_VAULT_ADDR='{}'", args.vault_addr).expect("string write infallible");
 
     if let Some(ref cred_token) = args.credential_token {
         writeln!(

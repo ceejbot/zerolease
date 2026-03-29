@@ -92,9 +92,7 @@ pub async fn handle_get(
     let grant = client
         .request_lease("credential-helper", secret_name, target_domain)
         .await?;
-    let secret_bytes = client
-        .access_secret(*grant.lease_id.as_uuid(), target_domain)
-        .await?;
+    let secret_bytes = client.access_secret(*grant.lease_id.as_uuid(), target_domain).await?;
     let secret = String::from_utf8(secret_bytes)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "secret is not UTF-8"))?;
 
@@ -153,8 +151,7 @@ mod tests {
     #[test]
     fn write_credential_format() {
         let mut buf = Vec::new();
-        write_credential(&mut buf, "x-access-token", "ghp_abc123")
-            .expect("should write");
+        write_credential(&mut buf, "x-access-token", "ghp_abc123").expect("should write");
         let output = String::from_utf8(buf).expect("should be utf8");
 
         assert!(output.contains("username=x-access-token\n"));

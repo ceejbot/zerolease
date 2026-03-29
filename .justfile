@@ -2,12 +2,12 @@ _help:
     just -l
 
 # Run all unit tests using nextest.
-test:
+@test:
     cargo nextest run --workspace --all-targets --future-incompat-report
     cargo nextest run -p zerolease-store-postgres --manifest-path crates/zerolease-store-postgres/Cargo.toml  --run-ignored ignored-only --future-incompat-report
 
 # Run the fuzz tests against the wireline protocol.
-fuzz:
+@fuzz:
     cargo +nightly fuzz run fuzz_read_frame -- -max_total_time=60
     cargo +nightly fuzz run fuzz_protocol_deser -- -max_total_time=60
     cargo +nightly fuzz run fuzz_domain_scope -- -max_total_time=60
@@ -16,22 +16,22 @@ fuzz:
 all-tests: test fuzz
 
 # Get a code coverage report using llvm-cov.
-coverage:
+@coverage:
     cargo llvm-cov --all-targets --workspace --summary-only
 
 # Run the nightly formatter.
-fmt:
+@fmt:
     cargo +nightly fmt
 
 # Run the same checks we run in CI. Requires nightly.
-ci: test fmt
+@ci: test fmt
     cargo clippy --workspace --all-targets
     cargo clippy -p zerolease-store-postgres --manifest-path crates/zerolease-store-postgres/Cargo.toml
-    # cargo test --doc  --no-tests
-    # cargo test --doc -p zerolease-store-postgres --manifest-path crates/zerolease-store-postgres/Cargo.toml --no-tests
+    cargo test --doc
+    cargo test --doc -p zerolease-store-postgres --manifest-path crates/zerolease-store-postgres/Cargo.toml
 
 # Install required tools
-setup:
+@setup:
     brew tap ceejbot/tap
     brew install cargo-nextest tomato semver-bump cargo-llvm-cov
     rustup install nightly
@@ -50,5 +50,5 @@ version BUMP:
     echo "Release tagged for version v${version}"
 
 # publish to crates.io
-release:
+@release:
     cargo publish

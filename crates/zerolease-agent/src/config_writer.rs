@@ -45,18 +45,12 @@ mod tests {
 
     #[test]
     fn template_expansion() {
-        assert_eq!(
-            expand_template("token=${SECRET}", "abc123"),
-            "token=abc123"
-        );
+        assert_eq!(expand_template("token=${SECRET}", "abc123"), "token=abc123");
         assert_eq!(
             expand_template("prefix ${SECRET} suffix ${SECRET}", "X"),
             "prefix X suffix X"
         );
-        assert_eq!(
-            expand_template("no placeholder", "secret"),
-            "no placeholder"
-        );
+        assert_eq!(expand_template("no placeholder", "secret"), "no placeholder");
     }
 
     #[test]
@@ -91,11 +85,7 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             let perms = fs::metadata(&path).expect("should stat").permissions();
-            assert_eq!(
-                perms.mode() & 0o777,
-                0o600,
-                "config should be mode 0600"
-            );
+            assert_eq!(perms.mode() & 0o777, 0o600, "config should be mode 0600");
         }
     }
 }

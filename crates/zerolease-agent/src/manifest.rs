@@ -51,8 +51,7 @@ impl CredentialManifest {
     /// Parse a manifest from a file path.
     pub fn from_file(path: &Path) -> std::io::Result<Self> {
         let contents = std::fs::read_to_string(path)?;
-        serde_json::from_str(&contents)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        serde_json::from_str(&contents).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 
     /// Build a lookup table from git host → (secret_name, target_domain)
@@ -62,10 +61,7 @@ impl CredentialManifest {
         for entry in &self.credentials {
             for mechanism in &entry.inject {
                 if let InjectMechanism::GitCredential { host } = mechanism {
-                    map.insert(
-                        host.clone(),
-                        (entry.secret_name.as_str(), entry.target_domain.as_str()),
-                    );
+                    map.insert(host.clone(), (entry.secret_name.as_str(), entry.target_domain.as_str()));
                 }
             }
         }
@@ -132,7 +128,8 @@ mod tests {
 
     #[test]
     fn git_host_map_builds_correctly() {
-        let manifest = from_json(r#"{
+        let manifest = from_json(
+            r#"{
             "credentials": [
                 {
                     "secret_name": "github-pat",
@@ -150,7 +147,9 @@ mod tests {
                     ]
                 }
             ]
-        }"#).expect("should parse");
+        }"#,
+        )
+        .expect("should parse");
 
         let map = manifest.git_host_map();
         assert_eq!(map.len(), 2, "should have 2 git host mappings");
@@ -160,8 +159,7 @@ mod tests {
 
     #[test]
     fn empty_manifest() {
-        let manifest = from_json(r#"{ "credentials": [] }"#)
-            .expect("should parse empty manifest");
+        let manifest = from_json(r#"{ "credentials": [] }"#).expect("should parse empty manifest");
         assert!(manifest.credentials.is_empty());
         assert!(manifest.git_host_map().is_empty());
     }
@@ -180,9 +178,6 @@ mod tests {
                 "inject": [{ "type": "magic", "wand": "elder" }]
             }]
         }"#;
-        assert!(
-            from_json(json).is_err(),
-            "unknown inject type should fail to parse"
-        );
+        assert!(from_json(json).is_err(), "unknown inject type should fail to parse");
     }
 }

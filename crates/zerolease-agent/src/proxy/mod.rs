@@ -1,11 +1,11 @@
 //! Lease-aware HTTPS proxy.
 //!
 //! Two modes:
-//! - **Explicit proxy** (default port 8080): Handles HTTP CONNECT
-//!   requests. Tools reach it via `HTTPS_PROXY` env var.
-//! - **Transparent proxy** (default port 8443): Handles iptables-
-//!   redirected TLS connections, extracts domain from TLS SNI.
-//!   Defense-in-depth only — deny when SNI is absent.
+//! - **Explicit proxy** (default port 8080): Handles HTTP CONNECT requests.
+//!   Tools reach it via `HTTPS_PROXY` env var.
+//! - **Transparent proxy** (default port 8443): Handles iptables- redirected
+//!   TLS connections, extracts domain from TLS SNI. Defense-in-depth only —
+//!   deny when SNI is absent.
 //!
 //! Both modes check the lease state before allowing a connection.
 //! If the domain has no active lease, the connection is blocked.
@@ -103,10 +103,7 @@ pub async fn run(args: ProxyArgs) -> ExitCode {
 }
 
 /// Accept loop for the explicit CONNECT proxy.
-async fn accept_explicit(
-    listener: TcpListener,
-    state: SharedLeaseState,
-) -> std::io::Result<()> {
+async fn accept_explicit(listener: TcpListener, state: SharedLeaseState) -> std::io::Result<()> {
     loop {
         let (stream, peer_addr) = listener.accept().await?;
         let state = Arc::clone(&state);
@@ -119,10 +116,7 @@ async fn accept_explicit(
 }
 
 /// Accept loop for the transparent proxy (SNI extraction).
-async fn accept_transparent(
-    listener: TcpListener,
-    state: SharedLeaseState,
-) -> std::io::Result<()> {
+async fn accept_transparent(listener: TcpListener, state: SharedLeaseState) -> std::io::Result<()> {
     loop {
         let (stream, peer_addr) = listener.accept().await?;
         let state = Arc::clone(&state);
@@ -135,11 +129,7 @@ async fn accept_transparent(
 }
 
 /// Background task that reloads the lease state file periodically.
-async fn lease_refresh_loop(
-    state: SharedLeaseState,
-    path: &std::path::Path,
-    interval: Duration,
-) {
+async fn lease_refresh_loop(state: SharedLeaseState, path: &std::path::Path, interval: Duration) {
     loop {
         tokio::time::sleep(interval).await;
 

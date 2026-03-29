@@ -29,16 +29,12 @@ pub struct LeaseInfo {
 
 impl LeaseState {
     pub fn new() -> Self {
-        Self {
-            leases: HashMap::new(),
-        }
+        Self { leases: HashMap::new() }
     }
 
     /// Check if a domain has an active (non-expired) lease.
     pub fn is_allowed(&self, domain: &str) -> bool {
-        self.leases
-            .get(domain)
-            .is_some_and(|info| info.expires_at > Utc::now())
+        self.leases.get(domain).is_some_and(|info| info.expires_at > Utc::now())
     }
 
     /// Remove expired leases from the state.
@@ -55,8 +51,8 @@ impl LeaseState {
         std::fs::create_dir_all(dir)?;
 
         let temp_path = path.with_extension("tmp");
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let json =
+            serde_json::to_string_pretty(self).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         std::fs::write(&temp_path, json)?;
         std::fs::rename(&temp_path, path)?;
         Ok(())
@@ -65,8 +61,7 @@ impl LeaseState {
     /// Read lease state from a file.
     pub fn read_from(path: &Path) -> std::io::Result<Self> {
         let contents = std::fs::read_to_string(path)?;
-        serde_json::from_str(&contents)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        serde_json::from_str(&contents).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 }
 
@@ -78,8 +73,9 @@ impl Default for LeaseState {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use chrono::Duration;
+
+    use super::*;
 
     #[test]
     fn active_lease_is_allowed() {

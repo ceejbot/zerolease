@@ -26,11 +26,7 @@ const MAX_TUNNEL_DURATION: Duration = Duration::from_secs(3600); // 1 hour
 const ALLOWED_PORTS: &[u16] = &[443, 8443];
 
 /// Handle one explicit proxy connection (HTTP CONNECT).
-pub async fn handle_connect(
-    stream: TcpStream,
-    peer_addr: SocketAddr,
-    state: &SharedLeaseState,
-) -> std::io::Result<()> {
+pub async fn handle_connect(stream: TcpStream, peer_addr: SocketAddr, state: &SharedLeaseState) -> std::io::Result<()> {
     let (reader, mut writer) = tokio::io::split(stream);
     let mut reader = BufReader::new(reader);
 
@@ -183,10 +179,7 @@ fn is_valid_hostname(host: &str) -> bool {
 
 /// Resolve a hostname and validate the resulting IP is not private/internal.
 fn resolve_and_validate(target: &str) -> Result<SocketAddr, &'static str> {
-    let addrs: Vec<SocketAddr> = target
-        .to_socket_addrs()
-        .map_err(|_| "DNS resolution failed")?
-        .collect();
+    let addrs: Vec<SocketAddr> = target.to_socket_addrs().map_err(|_| "DNS resolution failed")?.collect();
 
     let addr = addrs.first().ok_or("DNS returned no addresses")?;
 
@@ -217,13 +210,15 @@ fn is_private_ip(ip: IpAddr) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::lease_state::{LeaseInfo, LeaseState};
-    use chrono::{Duration as CDuration, Utc};
     use std::sync::Arc;
+
+    use chrono::{Duration as CDuration, Utc};
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::TcpListener;
     use tokio::sync::RwLock;
+
+    use super::*;
+    use crate::lease_state::{LeaseInfo, LeaseState};
 
     #[test]
     fn parse_valid_connect() {
@@ -316,11 +311,11 @@ mod tests {
             .expect("send");
 
         let mut response = String::new();
-        BufReader::new(&mut client).read_line(&mut response).await.expect("read");
-        assert!(
-            response.contains("502"),
-            "private IP should get 502, got: {response}"
-        );
+        BufReader::new(&mut client)
+            .read_line(&mut response)
+            .await
+            .expect("read");
+        assert!(response.contains("502"), "private IP should get 502, got: {response}");
 
         proxy_task.await.expect("proxy task");
     }
@@ -343,7 +338,10 @@ mod tests {
             .expect("send");
 
         let mut response = String::new();
-        BufReader::new(&mut client).read_line(&mut response).await.expect("read");
+        BufReader::new(&mut client)
+            .read_line(&mut response)
+            .await
+            .expect("read");
         assert!(response.contains("403"), "expected 403, got: {response}");
 
         proxy_task.await.expect("proxy task");
@@ -368,7 +366,10 @@ mod tests {
             .expect("send");
 
         let mut response = String::new();
-        BufReader::new(&mut client).read_line(&mut response).await.expect("read");
+        BufReader::new(&mut client)
+            .read_line(&mut response)
+            .await
+            .expect("read");
         assert!(response.contains("403"), "SSH port should be blocked: {response}");
 
         proxy_task.await.expect("proxy task");
@@ -392,7 +393,10 @@ mod tests {
             .expect("send");
 
         let mut response = String::new();
-        BufReader::new(&mut client).read_line(&mut response).await.expect("read");
+        BufReader::new(&mut client)
+            .read_line(&mut response)
+            .await
+            .expect("read");
         assert!(response.contains("400"), "path traversal should get 400: {response}");
 
         proxy_task.await.expect("proxy task");

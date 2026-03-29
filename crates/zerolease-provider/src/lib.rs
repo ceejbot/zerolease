@@ -20,9 +20,8 @@ pub use credential::CredentialGuard;
 pub use error::ProviderError;
 pub use provider::{CredentialProvider, CredentialRequest};
 pub use static_provider::StaticProvider;
-#[cfg(feature = "vault")]
-pub use zerolease_provider::ZeroleaseProvider;
-
 // Re-export newtypes from zerolease::types so downstream crates don't need
 // a direct dependency on the `zerolease` base crate.
 pub use zerolease::types::{AgentId, DomainScope, SecretName};
+#[cfg(feature = "vault")]
+pub use zerolease_provider::ZeroleaseProvider;
