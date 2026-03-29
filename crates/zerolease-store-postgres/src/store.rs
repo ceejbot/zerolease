@@ -7,8 +7,8 @@ use uuid::Uuid;
 
 use zerolease::error::{Error, Result};
 use zerolease::store::{
-    parse_cipher_algorithm, parse_secret_kind, BatchUpdateItem, CipherAlgorithm, SecretKind,
-    SecretMetadata, SecretStore, StoreSecretParams, StoredSecret,
+    BatchUpdateItem, CipherAlgorithm, SecretMetadata, SecretStore, StoreSecretParams, StoredSecret,
+    parse_cipher_algorithm, parse_secret_kind,
 };
 use zerolease::types::{SecretId, SecretName};
 
@@ -184,12 +184,10 @@ impl SecretStore for PostgresStore {
     }
 
     async fn list(&self) -> Result<Vec<SecretMetadata>> {
-        let rows = sqlx::query(
-            "SELECT id, name, kind, description, created_at, updated_at, version FROM secrets",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| Error::Storage(format!("list query failed: {e}")))?;
+        let rows = sqlx::query("SELECT id, name, kind, description, created_at, updated_at, version FROM secrets")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| Error::Storage(format!("list query failed: {e}")))?;
 
         rows.iter().map(row_to_metadata).collect()
     }
@@ -198,7 +196,8 @@ impl SecretStore for PostgresStore {
 /// Extract a column value from a PostgreSQL row, mapping errors to `Error::Storage`.
 macro_rules! col {
     ($row:expr, $name:expr, $type:ty) => {
-        $row.try_get::<$type, _>($name).map_err(|e| Error::Storage(e.to_string()))?
+        $row.try_get::<$type, _>($name)
+            .map_err(|e| Error::Storage(e.to_string()))?
     };
 }
 
@@ -242,14 +241,11 @@ mod tests {
     use zerolease::store::CipherAlgorithm;
 
     fn test_url() -> String {
-        std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://localhost/zerolease_test".to_string())
+        std::env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://localhost/zerolease_test".to_string())
     }
 
     async fn test_store() -> PostgresStore {
-        PostgresStore::new(&test_url())
-            .await
-            .expect("should create store")
+        PostgresStore::new(&test_url()).await.expect("should create store")
     }
 
     fn test_params(name: &str) -> StoreSecretParams {
@@ -276,11 +272,17 @@ mod tests {
         let store = test_store().await;
         cleanup(&store, &["pg-roundtrip"]).await;
 
-        let stored = store.put(test_params("pg-roundtrip")).await.expect("put should store secret");
+        let stored = store
+            .put(test_params("pg-roundtrip"))
+            .await
+            .expect("put should store secret");
         assert_eq!(stored.name, SecretName::new("pg-roundtrip"), "name should match");
         assert_eq!(stored.version, 1, "initial version should be 1");
 
-        let fetched = store.get(&SecretName::new("pg-roundtrip")).await.expect("get should retrieve secret");
+        let fetched = store
+            .get(&SecretName::new("pg-roundtrip"))
+            .await
+            .expect("get should retrieve secret");
         assert_eq!(fetched.ciphertext, stored.ciphertext, "ciphertext should match");
 
         cleanup(&store, &["pg-roundtrip"]).await;
@@ -292,8 +294,15 @@ mod tests {
         let store = test_store().await;
         cleanup(&store, &["pg-dup"]).await;
 
-        store.put(test_params("pg-dup")).await.expect("first put should succeed");
-        let err = store.put(test_params("pg-dup")).await.expect_err("duplicate put should fail").to_string();
+        store
+            .put(test_params("pg-dup"))
+            .await
+            .expect("first put should succeed");
+        let err = store
+            .put(test_params("pg-dup"))
+            .await
+            .expect_err("duplicate put should fail")
+            .to_string();
         assert!(err.contains("already exists"), "expected 'already exists', got: {err}");
 
         cleanup(&store, &["pg-dup"]).await;
@@ -318,9 +327,17 @@ mod tests {
         let store = test_store().await;
         cleanup(&store, &["pg-versioned"]).await;
 
-        store.put(test_params("pg-versioned")).await.expect("put should create secret");
+        store
+            .put(test_params("pg-versioned"))
+            .await
+            .expect("put should create secret");
         let updated = store
-            .update(&SecretName::new("pg-versioned"), vec![10, 20], vec![1; 12], CipherAlgorithm::Aes256Gcm)
+            .update(
+                &SecretName::new("pg-versioned"),
+                vec![10, 20],
+                vec![1; 12],
+                CipherAlgorithm::Aes256Gcm,
+            )
             .await
             .expect("update should succeed");
         assert_eq!(updated.version, 2, "version should increment to 2");
@@ -334,14 +351,23 @@ mod tests {
         let store = test_store().await;
         cleanup(&store, &["pg-doomed"]).await;
 
-        store.put(test_params("pg-doomed")).await.expect("put should create secret");
-        store.delete(&SecretName::new("pg-doomed")).await.expect("delete should succeed");
+        store
+            .put(test_params("pg-doomed"))
+            .await
+            .expect("put should create secret");
+        store
+            .delete(&SecretName::new("pg-doomed"))
+            .await
+            .expect("delete should succeed");
 
         let err = store
             .get(&SecretName::new("pg-doomed"))
             .await
             .expect_err("get after delete should fail");
-        assert!(err.to_string().contains("not found"), "expected 'not found' after delete");
+        assert!(
+            err.to_string().contains("not found"),
+            "expected 'not found' after delete"
+        );
     }
 
     #[tokio::test]
@@ -355,8 +381,14 @@ mod tests {
 
         let list = store.list().await.expect("list should succeed");
         let names: Vec<String> = list.iter().map(|m| m.name.as_str().to_string()).collect();
-        assert!(names.contains(&"pg-list-a".to_string()), "list should contain pg-list-a, got: {names:?}");
-        assert!(names.contains(&"pg-list-b".to_string()), "list should contain pg-list-b, got: {names:?}");
+        assert!(
+            names.contains(&"pg-list-a".to_string()),
+            "list should contain pg-list-a, got: {names:?}"
+        );
+        assert!(
+            names.contains(&"pg-list-b".to_string()),
+            "list should contain pg-list-b, got: {names:?}"
+        );
 
         cleanup(&store, &["pg-list-a", "pg-list-b"]).await;
     }

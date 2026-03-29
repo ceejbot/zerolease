@@ -35,8 +35,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use zerolease::error::{Error, Result};
 use zerolease::store::{
-    parse_cipher_algorithm, parse_secret_kind, BatchUpdateItem, CipherAlgorithm, SecretKind, SecretMetadata,
-    SecretStore, StoreSecretParams, StoredSecret,
+    BatchUpdateItem, CipherAlgorithm, SecretMetadata, SecretStore, StoreSecretParams, StoredSecret,
+    parse_cipher_algorithm, parse_secret_kind,
 };
 use zerolease::types::{SecretId, SecretName};
 
@@ -485,6 +485,7 @@ impl SecretStore for AwsSecretsManagerStore {
 #[cfg(test)]
 mod tests {
     use zerolease::store::CipherAlgorithm;
+    use zerolease::types::SecretKind;
 
     use super::*;
 

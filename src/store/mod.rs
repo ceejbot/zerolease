@@ -17,11 +17,10 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+pub use zerolease_types::store::{CipherAlgorithm, SecretKind, SecretMetadata};
 
 use crate::error::Result;
 use crate::types::{SecretId, SecretName};
-
-pub use zerolease_types::store::{CipherAlgorithm, SecretKind, SecretMetadata};
 
 // Storage backend implementations live in separate crates.
 // See zerolease-store-rusqlite, zerolease-store-postgres, and

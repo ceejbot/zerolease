@@ -91,10 +91,10 @@ pub mod server;
 pub mod store;
 pub mod transport;
 pub mod types {
+    pub use zerolease_types::audit::RevocationReason;
     pub use zerolease_types::identity::*;
     pub use zerolease_types::lease::{LeaseGrant, LeaseTerms};
     pub use zerolease_types::store::{CipherAlgorithm, SecretKind, SecretMetadata};
-    pub use zerolease_types::audit::RevocationReason;
 }
 pub mod vault;
 

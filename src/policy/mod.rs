@@ -101,16 +101,14 @@ pub struct PolicyConfig {
 impl PolicyConfig {
     /// Load a policy configuration from a JSON file.
     pub fn from_file(path: impl AsRef<std::path::Path>) -> Result<Self> {
-        let contents = std::fs::read_to_string(path.as_ref()).map_err(|e| {
-            Error::InvalidConfig(format!("failed to read policy file: {e}"))
-        })?;
+        let contents = std::fs::read_to_string(path.as_ref())
+            .map_err(|e| Error::InvalidConfig(format!("failed to read policy file: {e}")))?;
         Self::from_json(&contents)
     }
 
     /// Parse a policy configuration from a JSON string.
     pub fn from_json(json: &str) -> Result<Self> {
-        serde_json::from_str(json)
-            .map_err(|e| Error::InvalidConfig(format!("invalid policy JSON: {e}")))
+        serde_json::from_str(json).map_err(|e| Error::InvalidConfig(format!("invalid policy JSON: {e}")))
     }
 }
 
@@ -338,11 +336,23 @@ mod tests {
 
         let engine = PolicyEngine::new(config);
         assert!(
-            engine.evaluate(&AgentId::new("tool-git"), &SecretName::new("github-pat"), &DomainScope::new("github.com")).is_ok(),
+            engine
+                .evaluate(
+                    &AgentId::new("tool-git"),
+                    &SecretName::new("github-pat"),
+                    &DomainScope::new("github.com")
+                )
+                .is_ok(),
             "exact match should grant access"
         );
         assert!(
-            engine.evaluate(&AgentId::new("ci-runner"), &SecretName::new("anything"), &DomainScope::new("db.internal.example.com")).is_ok(),
+            engine
+                .evaluate(
+                    &AgentId::new("ci-runner"),
+                    &SecretName::new("anything"),
+                    &DomainScope::new("db.internal.example.com")
+                )
+                .is_ok(),
             "prefix + Any + wildcard domain should grant access"
         );
     }

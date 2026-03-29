@@ -9,8 +9,8 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 use zerolease::error::{Error, Result};
 use zerolease::store::{
-    parse_cipher_algorithm, parse_secret_kind, BatchUpdateItem, CipherAlgorithm, SecretKind, SecretMetadata,
-    SecretStore, StoreSecretParams, StoredSecret,
+    BatchUpdateItem, CipherAlgorithm, SecretMetadata, SecretStore, StoreSecretParams, StoredSecret,
+    parse_cipher_algorithm, parse_secret_kind,
 };
 use zerolease::types::{SecretId, SecretName};
 
@@ -304,6 +304,7 @@ fn row_to_metadata(row: &rusqlite::Row<'_>) -> Result<SecretMetadata> {
 mod tests {
     use tempfile::NamedTempFile;
     use zerolease::store::CipherAlgorithm;
+    use zerolease::types::SecretKind;
 
     use super::*;
 

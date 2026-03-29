@@ -24,12 +24,11 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+pub use zerolease_types::audit::RevocationReason;
 
 use crate::error::Result;
 use crate::transport::PeerIdentity;
 use crate::types::{AgentId, DomainScope, LeaseId, SecretName};
-
-pub use zerolease_types::audit::RevocationReason;
 
 // Audit log implementations:
 // - TracingAuditLog (below): emit-only, uses the tracing facade

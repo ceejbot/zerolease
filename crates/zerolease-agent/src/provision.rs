@@ -80,11 +80,7 @@ pub async fn run(args: ProvisionArgs) -> ExitCode {
     let mut acquired_leases: Vec<Uuid> = Vec::new();
 
     let result = acquire_credentials(
-        &mut client,
-        &manifest,
-        &mut env_lines,
-        &mut lease_state,
-        &mut acquired_leases,
+        &mut client, &manifest, &mut env_lines, &mut lease_state, &mut acquired_leases,
     )
     .await;
 
@@ -94,10 +90,7 @@ pub async fn run(args: ProvisionArgs) -> ExitCode {
         if !acquired_leases.is_empty() {
             eprintln!("rolling back {} acquired lease(s)...", acquired_leases.len());
             for lease_id in &acquired_leases {
-                if let Err(e) = client
-                    .revoke_lease(*lease_id, RevocationReason::AdminRevoked)
-                    .await
-                {
+                if let Err(e) = client.revoke_lease(*lease_id, RevocationReason::AdminRevoked).await {
                     tracing::warn!(%lease_id, error = %e, "failed to revoke during rollback");
                 }
             }

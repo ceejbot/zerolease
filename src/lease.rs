@@ -15,11 +15,10 @@
 
 use chrono::{DateTime, TimeDelta, Utc};
 use secrecy::{ExposeSecret, SecretString};
+pub use zerolease_types::lease::{LeaseGrant, LeaseTerms};
 
 use crate::error::{Error, Result};
 use crate::types::{AgentId, DomainScope, LeaseId, SecretName};
-
-pub use zerolease_types::lease::{LeaseGrant, LeaseTerms};
 
 /// A live lease granting an agent access to a specific credential.
 ///
