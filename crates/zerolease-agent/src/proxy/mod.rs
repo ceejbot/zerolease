@@ -135,9 +135,17 @@ async fn lease_refresh_loop(state: SharedLeaseState, path: &std::path::Path, int
 
         match LeaseState::read_from(path) {
             Ok(new_state) => {
-                let mut guard = state.write().await;
-                *guard = new_state;
-                guard.prune_expired();
+                if new_state.version != crate::lease_state::LEASE_STATE_VERSION {
+                    tracing::warn!(
+                        version = new_state.version,
+                        expected = crate::lease_state::LEASE_STATE_VERSION,
+                        "lease state file has unknown version, ignoring"
+                    );
+                } else {
+                    let mut guard = state.write().await;
+                    *guard = new_state;
+                    guard.prune_expired();
+                }
             }
             Err(e) => {
                 tracing::warn!(error = %e, "failed to reload lease state");

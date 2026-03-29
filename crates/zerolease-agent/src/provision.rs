@@ -11,7 +11,8 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-// chrono re-exported through zerolease types
+use uuid::Uuid;
+use zerolease::audit::RevocationReason;
 use zerolease::client::VaultClient;
 use zerolease::transport::tcp::TcpConnector;
 
@@ -75,76 +76,33 @@ pub async fn run(args: ProvisionArgs) -> ExitCode {
 
     let mut env_lines = String::new();
     let mut lease_state = LeaseState::new();
+    // Track acquired leases so we can revoke them if provisioning fails partway.
+    let mut acquired_leases: Vec<Uuid> = Vec::new();
 
-    for entry in &manifest.credentials {
-        tracing::info!(secret = %entry.secret_name, domain = %entry.target_domain, "acquiring");
+    let result = acquire_credentials(
+        &mut client,
+        &manifest,
+        &mut env_lines,
+        &mut lease_state,
+        &mut acquired_leases,
+    )
+    .await;
 
-        let grant = match client
-            .request_lease("provisioner", &entry.secret_name, &entry.target_domain)
-            .await
-        {
-            Ok(g) => g,
-            Err(e) => {
-                eprintln!("error: lease failed for {}: {e}", entry.secret_name);
-                return ExitCode::FAILURE;
-            }
-        };
-
-        let secret_bytes = match client
-            .access_secret(*grant.lease_id.as_uuid(), &entry.target_domain)
-            .await
-        {
-            Ok(b) => b,
-            Err(e) => {
-                eprintln!("error: access failed for {}: {e}", entry.secret_name);
-                return ExitCode::FAILURE;
-            }
-        };
-
-        let secret = match String::from_utf8(secret_bytes) {
-            Ok(s) => s,
-            Err(_) => {
-                eprintln!("error: secret {} is not valid UTF-8", entry.secret_name);
-                return ExitCode::FAILURE;
-            }
-        };
-
-        // Record lease for the proxy.
-        lease_state.leases.insert(
-            entry.target_domain.clone(),
-            LeaseInfo {
-                lease_id: grant.lease_id.as_uuid().to_string(),
-                expires_at: grant.expires_at,
-            },
-        );
-
-        // Process injection mechanisms.
-        for mechanism in &entry.inject {
-            match mechanism {
-                InjectMechanism::Env { var } => {
-                    writeln!(env_lines, "export {var}='{}'", secret.replace('\'', "'\\''"))
-                        .expect("string write infallible");
-                }
-                InjectMechanism::File { path, template } => {
-                    let expanded = expand_tilde(path);
-                    let content = expand_template(template, &secret);
-                    if let Err(e) = write_config(&expanded, &content) {
-                        eprintln!("error: failed to write {}: {e}", expanded.display());
-                        return ExitCode::FAILURE;
-                    }
-                    tracing::info!(path = %expanded.display(), "wrote config file");
-                }
-                InjectMechanism::GitCredential { .. } => {
-                    // Handled by credential-fill at git-request time.
+    if let Err(msg) = result {
+        eprintln!("error: {msg}");
+        // Rollback: revoke all acquired leases before exiting.
+        if !acquired_leases.is_empty() {
+            eprintln!("rolling back {} acquired lease(s)...", acquired_leases.len());
+            for lease_id in &acquired_leases {
+                if let Err(e) = client
+                    .revoke_lease(*lease_id, RevocationReason::AdminRevoked)
+                    .await
+                {
+                    tracing::warn!(%lease_id, error = %e, "failed to revoke during rollback");
                 }
             }
         }
-
-        tracing::info!(
-            secret = %entry.secret_name,
-            lease_id = %grant.lease_id.as_uuid(),
-            "provisioned"
-        );
+        return ExitCode::FAILURE;
     }
 
     // Add vault address for credential-fill (but NOT the prompt-run token).
@@ -196,6 +154,68 @@ pub async fn run(args: ProvisionArgs) -> ExitCode {
     );
 
     ExitCode::SUCCESS
+}
+
+/// Acquire all credentials from the vault, populating env_lines, lease_state,
+/// and acquired_leases. Returns Err(message) on the first failure.
+async fn acquire_credentials(
+    client: &mut VaultClient<TcpConnector>,
+    manifest: &CredentialManifest,
+    env_lines: &mut String,
+    lease_state: &mut LeaseState,
+    acquired_leases: &mut Vec<Uuid>,
+) -> std::result::Result<(), String> {
+    for entry in &manifest.credentials {
+        tracing::info!(secret = %entry.secret_name, domain = %entry.target_domain, "acquiring");
+
+        let grant = client
+            .request_lease("provisioner", &entry.secret_name, &entry.target_domain)
+            .await
+            .map_err(|e| format!("lease failed for {}: {e}", entry.secret_name))?;
+
+        acquired_leases.push(*grant.lease_id.as_uuid());
+
+        let secret_bytes = client
+            .access_secret(*grant.lease_id.as_uuid(), &entry.target_domain)
+            .await
+            .map_err(|e| format!("access failed for {}: {e}", entry.secret_name))?;
+
+        let secret =
+            String::from_utf8(secret_bytes).map_err(|_| format!("secret {} is not valid UTF-8", entry.secret_name))?;
+
+        lease_state.leases.insert(
+            entry.target_domain.clone(),
+            LeaseInfo {
+                lease_id: grant.lease_id.as_uuid().to_string(),
+                expires_at: grant.expires_at,
+            },
+        );
+
+        for mechanism in &entry.inject {
+            match mechanism {
+                InjectMechanism::Env { var } => {
+                    writeln!(env_lines, "export {var}='{}'", secret.replace('\'', "'\\''"))
+                        .expect("string write infallible");
+                }
+                InjectMechanism::File { path, template } => {
+                    let expanded = expand_tilde(path);
+                    let content = expand_template(template, &secret);
+                    write_config(&expanded, &content)
+                        .map_err(|e| format!("failed to write {}: {e}", expanded.display()))?;
+                    tracing::info!(path = %expanded.display(), "wrote config file");
+                }
+                InjectMechanism::GitCredential { .. } => {}
+            }
+        }
+
+        tracing::info!(
+            secret = %entry.secret_name,
+            lease_id = %grant.lease_id.as_uuid(),
+            "provisioned"
+        );
+    }
+
+    Ok(())
 }
 
 /// Write the env file with mode 0600.

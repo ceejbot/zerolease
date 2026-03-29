@@ -102,7 +102,7 @@ impl PolicyConfig {
     /// Load a policy configuration from a JSON file.
     pub fn from_file(path: impl AsRef<std::path::Path>) -> Result<Self> {
         let contents = std::fs::read_to_string(path.as_ref()).map_err(|e| {
-            crate::error::Error::InvalidConfig(format!("failed to read policy file: {e}"))
+            Error::InvalidConfig(format!("failed to read policy file: {e}"))
         })?;
         Self::from_json(&contents)
     }
@@ -110,7 +110,7 @@ impl PolicyConfig {
     /// Parse a policy configuration from a JSON string.
     pub fn from_json(json: &str) -> Result<Self> {
         serde_json::from_str(json)
-            .map_err(|e| crate::error::Error::InvalidConfig(format!("invalid policy JSON: {e}")))
+            .map_err(|e| Error::InvalidConfig(format!("invalid policy JSON: {e}")))
     }
 }
 
