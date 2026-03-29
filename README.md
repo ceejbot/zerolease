@@ -121,9 +121,16 @@ JSON over length-prefixed frames (4-byte big-endian length + payload). Each conn
 - Auth tokens stored as SHA-256 hashes, never in plaintext
 - TCP listener binds localhost only
 
+## Documentation
+
+- **[Design](docs/design.md)** — Threat model, core abstractions, design decisions, what this is not.
+- **[Embedded guide](docs/guide-embedded.md)** — Integrating zerolease into a Rust application (e.g., zeroclaw). In-process vault, no server.
+- **[Cloud service guide](docs/guide-cloud-service.md)** — Running the vault as a server with PostgreSQL or AWS Secrets Manager. Multiple clients over UDS/TCP.
+- **[VM deployment guide](docs/guide-vm-deployment.md)** — Full production deployment with QEMU VMs, credential provisioner, lease-aware proxy, and iptables network jail.
+
 ## Status
 
-Early development. Trait definitions and core types are stable. Concrete backend implementations are functional. Integration-level documentation and a standalone server binary are planned.
+Early development. Core traits and backend implementations are functional. The VM agent (provisioner + proxy + credential helper) is implemented and security-audited. A standalone server binary is planned.
 
 ## License
 
